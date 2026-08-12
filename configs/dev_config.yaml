@@ -1,0 +1,56 @@
+# 미니어처 검증용 config (Week 1~3, 1~6단계)
+# 목적: 성능이 아니라 "코드가 에러 없이, 의도대로 동작하는가"를 빠르게 확인
+
+model:
+  # 배선 검증용 초소형 모델. Qwen2.5(본실험 모델)와 동일하게 q_proj/v_proj
+  # 어텐션 구조를 갖는 Llama-계열이라야 src/models.py의 LoraConfig(target_modules=
+  # ["q_proj","v_proj"])가 그대로 맞물린다 (gpt2는 결합형 c_attn이라 안 맞음).
+  name: "hf-internal-testing/tiny-random-LlamaForCausalLM"
+  # name: "Qwen/Qwen2.5-3B-Instruct"  # 또는 "meta-llama/Llama-3.2-3B-Instruct" — Week 1에 확정
+
+data:
+  subset_size: 20               # 클라이언트당 샘플 수 (극소량)
+  max_seq_length: 128
+  holdout_fraction: 0.1
+  rouge_l_sample_size: 4        # ROUGE-L 생성 평가용 카테고리 층화 샘플 개수(dev는 소량)
+
+federated:
+  num_clients: 2                # 소규모 멀티 클라이언트 테스트
+  num_rounds: 2
+  fraction_fit: 1.0
+  local_epochs: 1
+
+peft:
+  type: "lora"                  # lora | qlora | dora
+  lora_r: 4
+  lora_alpha: 8
+  lora_dropout: 0.05
+
+fl_algorithm:
+  type: "fedavg"                # fedavg | fedprox | scaffold
+  proximal_mu: 0.01
+
+partitioning:
+  alpha: 0.5                    # 고정값 (연구계획서 Subtask 1.1)
+  min_category_threshold: 150
+
+training:
+  optimizer: "adamw"
+  learning_rate: 2.0e-4          # PyYAML은 "2e-4"(소수점 없음)를 float로 못 읽고 문자열로 파싱하므로 "2.0e-4" 형식 유지
+  micro_batch_size: 2
+  grad_accumulation_steps: 2
+
+convergence:
+  min_improvement_pct: 1.0
+  patience_rounds: 3
+
+checkpointing:
+  enabled: true
+  save_every_round: true
+  path: "results/checkpoints/dev/"
+
+logging:
+  use_wandb: false
+  wandb_project: "dolly15k-fl-peft"
+  log_per_category_metrics: true
+  log_communication_bytes: true

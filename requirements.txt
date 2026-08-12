@@ -1,0 +1,12 @@
+torch
+transformers
+peft
+bitsandbytes
+flwr[simulation]
+pyyaml
+pytest
+datasets
+evaluate
+rouge-score
+wandb
+numpy
