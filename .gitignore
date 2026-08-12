@@ -1,0 +1,12 @@
+results/checkpoints/
+results/logs/*.jsonl
+results/logs/*.json
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+.ipynb_checkpoints/
+wandb/
+.env
+.claude/
