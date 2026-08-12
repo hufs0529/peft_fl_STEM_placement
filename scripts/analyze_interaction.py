@@ -13,6 +13,10 @@ Task 1의 6개 조합(3 FL x 2 PEFT) 로그를 모두 읽어:
 
 import glob
 import json
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.evaluate import (
     compute_interaction_effects,
