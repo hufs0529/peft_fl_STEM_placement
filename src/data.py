@@ -103,8 +103,12 @@ def tokenize_example(item: dict, tokenizer, max_length: int) -> dict:
     attention_mask = full["attention_mask"]
     labels = list(input_ids)
 
+    # tokenizer.padding_side가 "left"면 패딩이 앞에 붙어 실제 내용이 인덱스 0이
+    # 아닌 곳에서 시작한다. attention_mask에서 진짜 내용이 시작하는 위치를 찾아
+    # 거기서부터 프롬프트 길이만큼만 마스킹해야 padding_side와 무관하게 정확하다.
+    content_start = attention_mask.index(1) if 1 in attention_mask else 0
     prompt_len = min(len(prompt_ids), max_length)
-    for i in range(prompt_len):
+    for i in range(content_start, min(content_start + prompt_len, max_length)):
         labels[i] = -100
     for i, mask in enumerate(attention_mask):
         if mask == 0:
