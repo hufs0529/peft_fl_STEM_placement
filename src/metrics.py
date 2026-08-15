@@ -1,5 +1,10 @@
 """Subtask 1.2 core metrics: Trainable Parameters, Task Performance(PPL/ROUGE-L),
-Peak VRAM, Training Latency, Convergence Speed(round_records로부터 계산), Communication Cost."""
+Peak VRAM, Training Latency, Convergence Speed(round_records로부터 계산), Communication Cost.
+
+Subtask 1.2 core metrics: Trainable Parameters, Task Performance (PPL/ROUGE-L),
+Peak VRAM, Training Latency, Convergence Speed (computed from round_records),
+Communication Cost.
+"""
 
 import time
 from contextlib import contextmanager
@@ -10,7 +15,10 @@ import torch
 
 @contextmanager
 def track_vram_and_latency(device: str = "cuda"):
-    """with 블록 종료 시 {'peak_vram_gb', 'latency_sec'} 채움."""
+    """with 블록 종료 시 {'peak_vram_gb', 'latency_sec'} 채움.
+
+    Fills {'peak_vram_gb', 'latency_sec'} when the with block exits.
+    """
     stats: Dict[str, float] = {}
     if device == "cuda" and torch.cuda.is_available():
         torch.cuda.reset_peak_memory_stats()

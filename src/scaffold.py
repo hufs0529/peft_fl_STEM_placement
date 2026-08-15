@@ -7,6 +7,18 @@ SCAFFOLD 세 지점이 모두 필요하기 때문입니다.
 정확도보다 핵심 메커니즘(control variate로 client drift 보정)이 실제로
 작동하는지를 보여주는 데 목적을 둔 간소화 구현입니다 — 이 점을 최종
 리포트의 Limitations에 명시할 것 (계획서 §7 Week 6 항목 참고).
+
+Actual implementation of SCAFFOLD (Karimireddy et al., 2020, Option II
+approximation).
+
+In plan v2, SCAFFOLD is a core FL algorithm, not a stretch goal (§4.2) —
+answering RQ1 ("does correction sophistication interact with quantization?")
+requires all three points, FedAvg/FedProx/SCAFFOLD.
+
+This is a simplified implementation aimed at demonstrating that the core
+mechanism (correcting client drift via a control variate) actually works,
+rather than at accuracy — this should be stated explicitly in the final
+report's Limitations (see plan §7 Week 6 item).
 """
 
 from typing import Dict, List, Tuple
@@ -32,6 +44,9 @@ def scaffold_client_fit(
 ) -> Tuple[Dict[str, torch.Tensor], Dict[str, torch.Tensor], int, Dict[str, torch.Tensor]]:
     """한 클라이언트의 SCAFFOLD 로컬 학습 1라운드.
     반환: (delta_y, delta_c, num_examples, new_local_control)
+
+    One round of SCAFFOLD local training for a single client.
+    Returns: (delta_y, delta_c, num_examples, new_local_control)
     """
     set_trainable_state_dict(model, global_state_dict)
     optimizer = torch.optim.AdamW((p for p in model.parameters() if p.requires_grad), lr=learning_rate)
