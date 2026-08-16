@@ -19,6 +19,31 @@ Task 2 diagnostic:
     python scripts/run_experiment.py --peft <best_peft> --fl <best_fl> --local-epochs 5
 
 주의: 실행 전 반드시 pytest tests/ 로 검증을 통과시킬 것.
+
+Entry point for running the Week 4 main experiment.
+
+Task 1 core (Subtask 1.2, run 6 times):
+    python scripts/run_experiment.py --peft lora   --fl fedavg
+    python scripts/run_experiment.py --peft lora   --fl fedprox
+    python scripts/run_experiment.py --peft lora   --fl scaffold
+    python scripts/run_experiment.py --peft qlora  --fl fedavg
+    python scripts/run_experiment.py --peft qlora  --fl fedprox
+    python scripts/run_experiment.py --peft qlora  --fl scaffold
+
+Once all 6 are finished, run scripts/analyze_interaction.py to check the
+Subtask 1.3 interaction effects and the combination to use for the Task 2
+diagnostic experiments below.
+
+Task 2 diagnostic:
+    # Subtask 2.1 — pair DoRA with <largest_interaction_fl> to isolate
+    # quantization vs. compression
+    python scripts/run_experiment.py --peft dora --fl <largest_interaction_fl>
+
+    # Subtask 2.2 — rerun the best-performing core combination with
+    # local_epochs=5
+    python scripts/run_experiment.py --peft <best_peft> --fl <best_fl> --local-epochs 5
+
+Note: be sure to pass pytest tests/ before running.
 """
 
 import argparse
@@ -100,6 +125,9 @@ def main():
 
     # ROUGE-L 생성 평가는 held-out 전체가 아니라 카테고리 층화 샘플만 사용
     # (자기회귀 생성이 비싸므로 — Subtask 1.2, config['data']['rouge_l_sample_size']).
+    # ROUGE-L generation evaluation uses only a category-stratified sample,
+    # not the full held-out set (since autoregressive generation is
+    # expensive — Subtask 1.2, config['data']['rouge_l_sample_size']).
     rouge_sample_size = config["data"].get("rouge_l_sample_size", len(holdout_eval))
     rouge_eval_raw = sample_for_generation_eval(holdout_eval, sample_size=rouge_sample_size)
     rouge_eval_dataset = build_category_tagged_holdout(rouge_eval_raw, tokenizer, config["data"]["max_seq_length"])

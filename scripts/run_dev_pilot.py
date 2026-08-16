@@ -2,6 +2,12 @@
 
 사용법:
     python scripts/run_dev_pilot.py --stage single_client
+
+Week 1 pilot: verifies only that a single client's loss decreases, using
+the actual model (3B), without FL.
+
+Usage:
+    python scripts/run_dev_pilot.py --stage single_client
 """
 
 import argparse
