@@ -1,4 +1,8 @@
-"""계획서 v2 §6 리스크 대응책 검증: 체크포인트 저장 후 재개가 실제로 되는가."""
+"""계획서 v2 §6 리스크 대응책 검증: 체크포인트 저장 후 재개가 실제로 되는가.
+
+Verifies the mitigation for plan v2 §6 risk: does resuming after a
+checkpoint save actually work.
+"""
 
 import shutil
 

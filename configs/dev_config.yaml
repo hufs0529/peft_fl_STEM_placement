@@ -1,41 +1,64 @@
 # 미니어처 검증용 config (Week 1~3, 1~6단계)
 # 목적: 성능이 아니라 "코드가 에러 없이, 의도대로 동작하는가"를 빠르게 확인
+# Miniature config for verification (Week 1-3, stages 1-6)
+# Goal: quickly check "does the code run without error and as intended",
+# not performance
 
 model:
   # 배선 검증용 초소형 모델. Qwen2.5(본실험 모델)와 동일하게 q_proj/v_proj
   # 어텐션 구조를 갖는 Llama-계열이라야 src/models.py의 LoraConfig(target_modules=
   # ["q_proj","v_proj"])가 그대로 맞물린다 (gpt2는 결합형 c_attn이라 안 맞음).
+  # A tiny model for wiring verification. It must be a Llama-family model
+  # with the same q_proj/v_proj attention structure as Qwen2.5 (the main
+  # experiment model) for src/models.py's LoraConfig(target_modules=
+  # ["q_proj","v_proj"]) to line up correctly (gpt2 doesn't fit, since it
+  # uses a fused c_attn).
   name: "hf-internal-testing/tiny-random-LlamaForCausalLM"
   # name: "Qwen/Qwen2.5-3B-Instruct"  # 또는 "meta-llama/Llama-3.2-3B-Instruct" — Week 1에 확정
+  # name: "Qwen/Qwen2.5-3B-Instruct"  # or "meta-llama/Llama-3.2-3B-Instruct" — to be finalized in Week 1
 
 data:
+  # 클라이언트당 샘플 수 (극소량)
+  # Number of samples per client (very small amount)
   subset_size: 20               # 클라이언트당 샘플 수 (극소량)
   max_seq_length: 128
   holdout_fraction: 0.1
+  # ROUGE-L 생성 평가용 카테고리 층화 샘플 개수(dev는 소량)
+  # Number of category-stratified samples for ROUGE-L generation
+  # evaluation (small for dev)
   rouge_l_sample_size: 4        # ROUGE-L 생성 평가용 카테고리 층화 샘플 개수(dev는 소량)
 
 federated:
+  # 소규모 멀티 클라이언트 테스트
+  # Small-scale multi-client test
   num_clients: 2                # 소규모 멀티 클라이언트 테스트
   num_rounds: 2
   fraction_fit: 1.0
   local_epochs: 1
 
 peft:
+  # lora | qlora | dora
   type: "lora"                  # lora | qlora | dora
   lora_r: 4
   lora_alpha: 8
   lora_dropout: 0.05
 
 fl_algorithm:
+  # fedavg | fedprox | scaffold
   type: "fedavg"                # fedavg | fedprox | scaffold
   proximal_mu: 0.01
 
 partitioning:
+  # 고정값 (연구계획서 Subtask 1.1)
+  # Fixed value (research proposal Subtask 1.1)
   alpha: 0.5                    # 고정값 (연구계획서 Subtask 1.1)
   min_category_threshold: 150
 
 training:
   optimizer: "adamw"
+  # PyYAML은 "2e-4"(소수점 없음)를 float로 못 읽고 문자열로 파싱하므로 "2.0e-4" 형식 유지
+  # PyYAML can't parse "2e-4" (no decimal point) as a float — it parses it
+  # as a string — so the "2.0e-4" format is kept
   learning_rate: 2.0e-4          # PyYAML은 "2e-4"(소수점 없음)를 float로 못 읽고 문자열로 파싱하므로 "2.0e-4" 형식 유지
   micro_batch_size: 2
   grad_accumulation_steps: 2

@@ -6,6 +6,17 @@
                                    (카테고리별 균등 — §5.4 per-category breakdown 대응)
   3) tokenize_example()         - prompt는 라벨 마스킹(-100), response만 loss 계산
   4) build_client_dataloaders() - partitioning.py 결과 + 토크나이징 -> DataLoader
+
+Loading Dolly-15k + tokenization + train/held-out split (plan v2 §5.1, §5.3).
+
+Flow:
+  1) load_raw_dolly15k()        - load the raw data via HuggingFace datasets
+  2) build_holdout_split()      - carve out a global held-out eval set before client
+                                   distribution (evenly per category — supports the
+                                   §5.4 per-category breakdown)
+  3) tokenize_example()         - mask the prompt span in labels (-100), compute loss
+                                   only on the response
+  4) build_client_dataloaders() - combine partitioning.py output with tokenization -> DataLoader
 """
 
 from collections import defaultdict
@@ -40,7 +51,10 @@ def load_raw_dolly15k() -> List[dict]:
 def build_holdout_split(
     dataset: List[dict], holdout_fraction: float = 0.1, seed: int = 42
 ) -> Tuple[List[dict], List[dict]]:
-    """카테고리별로 균등하게 held-out 평가셋을 뗌 (계획서 §5.3)."""
+    """카테고리별로 균등하게 held-out 평가셋을 뗌 (계획서 §5.3).
+
+    Carve out a held-out eval set evenly across categories (plan §5.3).
+    """
     import random
 
     rng = random.Random(seed)
@@ -64,6 +78,14 @@ def sample_for_generation_eval(holdout_eval: List[dict], sample_size: int, seed:
     ROUGE-L은 자기회귀 생성이 필요해 PPL(teacher-forcing 순전파)보다 훨씬
     비싸다. held-out 전체(수천 개)를 매번 생성하는 대신, 카테고리 비율을
     유지한 채 sample_size개만 뽑아 비용을 통제한다 (Subtask 1.2/2.3).
+
+    Category-stratified subsample for ROUGE-L generation evaluation.
+
+    ROUGE-L requires autoregressive generation, which is far more expensive
+    than PPL (a teacher-forcing forward pass). Instead of generating over the
+    entire held-out set (thousands of examples) every time, this draws only
+    sample_size examples while preserving category proportions, to control
+    cost (Subtask 1.2/2.3).
     """
     import random
 
@@ -106,6 +128,10 @@ def tokenize_example(item: dict, tokenizer, max_length: int) -> dict:
     # tokenizer.padding_side가 "left"면 패딩이 앞에 붙어 실제 내용이 인덱스 0이
     # 아닌 곳에서 시작한다. attention_mask에서 진짜 내용이 시작하는 위치를 찾아
     # 거기서부터 프롬프트 길이만큼만 마스킹해야 padding_side와 무관하게 정확하다.
+    # If tokenizer.padding_side is "left", padding is prepended so the real content
+    # starts at an index other than 0. We find where the real content begins in
+    # attention_mask and mask only the prompt length from there, so this stays
+    # correct regardless of padding_side.
     content_start = attention_mask.index(1) if 1 in attention_mask else 0
     prompt_len = min(len(prompt_ids), max_length)
     for i in range(content_start, min(content_start + prompt_len, max_length)):
@@ -169,5 +195,9 @@ def build_client_dataloaders(
 
 
 def build_category_tagged_holdout(holdout_eval: List[dict], tokenizer, max_length: int) -> Dataset:
-    """§5.4 카테고리별 성능 분해용 — category/prompt/reference가 보존된 held-out 데이터셋."""
+    """§5.4 카테고리별 성능 분해용 — category/prompt/reference가 보존된 held-out 데이터셋.
+
+    A held-out dataset for the §5.4 per-category performance breakdown — one
+    that preserves category/prompt/reference fields.
+    """
     return TokenizedDolly(holdout_eval, tokenizer, max_length)

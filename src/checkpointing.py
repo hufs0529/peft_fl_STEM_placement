@@ -1,4 +1,7 @@
-"""라운드별 체크포인트 저장/복구 (계획서 v2 §6 리스크 테이블 대응책)."""
+"""라운드별 체크포인트 저장/복구 (계획서 v2 §6 리스크 테이블 대응책).
+
+Per-round checkpoint save/restore (mitigation for the risk table in plan v2 §6).
+"""
 
 import glob
 import os

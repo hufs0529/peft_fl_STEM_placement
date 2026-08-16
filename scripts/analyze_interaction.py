@@ -9,6 +9,23 @@ Task 1의 6개 조합(3 FL x 2 PEFT) 로그를 모두 읽어:
 사용법:
     python scripts/analyze_interaction.py
 (results/logs/ 안의 core run 6개 *_rounds.jsonl을 모두 읽어 계산)
+
+Week 5 (Subtask 1.3 / 2.1 selection) — run after the core 6 combinations
+are complete.
+
+Reads the logs for all 6 combinations of Task 1 (3 FL x 2 PEFT) to:
+  1) Subtask 1.3: compute the interaction effect (how much the degree to
+     which FedProx/SCAFFOLD improve over FedAvg changes going from
+     LoRA -> QLoRA) — the direct answer to Aim 1.
+  2) Subtask 2.1: decide the FL algorithm to pair with the DoRA diagnostic
+     experiment (whichever has the larger |interaction|).
+  3) Subtask 2.2: decide "the best-performing core combination" to use
+     for the local_epochs=5 robustness check.
+
+Usage:
+    python scripts/analyze_interaction.py
+(reads and computes over all 6 core run *_rounds.jsonl files in
+results/logs/)
 """
 
 import glob
@@ -78,6 +95,11 @@ def main():
     # rounds_run은 이미 매 라운드 무료로 로깅되는 값이라 추가 계산 없이 재사용.
     # FedProx/SCAFFOLD가 존재하는 이유 자체가 "더 빨리/안정적으로 수렴시키는 것"이라
     # 이 연구질문에 val_perplexity보다 오히려 더 직접적인 신호가 될 수 있다.
+    # rounds_run is already logged for free every round, so it is reused
+    # here with no extra computation. The very reason FedProx/SCAFFOLD
+    # exist is "to converge faster/more stably," so for this research
+    # question it can actually be a more direct signal than
+    # val_perplexity.
     conv_effects = compute_interaction_effects(run_results, performance_field="rounds_run")
     print("\n=== Subtask 1.3 (수렴 속도 기준, rounds_run — 양수=더 빨리 수렴) ===")
     for peft in ("lora", "qlora"):
