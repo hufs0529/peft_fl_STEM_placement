@@ -1,5 +1,9 @@
 """6단계: Non-IID 파티셔닝 검증 (Subtask 1.1 — Dirichlet(alpha=0.5)가 실제로
-비IID 분배를 만들어내는지, alpha가 작을수록 더 비IID해지는지 확인)."""
+비IID 분배를 만들어내는지, alpha가 작을수록 더 비IID해지는지 확인).
+
+Step 6: Verify non-IID partitioning (Subtask 1.1 — confirm that
+Dirichlet(alpha=0.5) actually produces a non-IID distribution, and that a
+smaller alpha yields stronger non-IID)."""
 
 from src.partitioning import heterogeneity_score, partition_by_category, summarize_partition
 
@@ -29,7 +33,11 @@ def test_partition_is_non_iid():
 
 def test_alpha_controls_heterogeneity_strength():
     """alpha=0.1 > alpha=0.5 > alpha=1.0 순으로 비IID 강도(heterogeneity_score)가
-    커야 함 — Dirichlet 파티셔닝이 의도대로 동작하는지에 대한 일반 검증."""
+    커야 함 — Dirichlet 파티셔닝이 의도대로 동작하는지에 대한 일반 검증.
+
+    The non-IID strength (heterogeneity_score) should increase in the order
+    alpha=0.1 > alpha=0.5 > alpha=1.0 — a general check that Dirichlet
+    partitioning behaves as intended."""
     dataset = make_dummy_dataset()
 
     scores = {}

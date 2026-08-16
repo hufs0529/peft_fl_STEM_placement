@@ -1,4 +1,6 @@
-"""4단계: 파라미터 왕복(round-trip) 단위 테스트."""
+"""4단계: 파라미터 왕복(round-trip) 단위 테스트.
+
+Step 4: unit tests for parameter round-trip conversion."""
 
 import torch
 

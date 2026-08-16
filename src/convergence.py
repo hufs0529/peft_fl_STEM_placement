@@ -1,4 +1,8 @@
-"""수렴 기준 실제 구현 (계획서 v2 §5.3): 3라운드 연속 1% 미만 개선이면 종료."""
+"""수렴 기준 실제 구현 (계획서 v2 §5.3): 3라운드 연속 1% 미만 개선이면 종료.
+
+Actual implementation of the convergence criterion (plan v2 §5.3): stop if
+improvement is below 1% for 3 consecutive rounds.
+"""
 
 from typing import List
 

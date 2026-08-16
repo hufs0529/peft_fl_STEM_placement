@@ -1,4 +1,7 @@
-"""FL 통신용 파라미터 추출/왕복(round-trip) 로직."""
+"""FL 통신용 파라미터 추출/왕복(round-trip) 로직.
+
+Parameter extraction/round-trip logic for FL communication.
+"""
 
 from collections import OrderedDict
 from typing import Dict, List
@@ -25,5 +28,9 @@ def ndarrays_to_state_dict(keys: List[str], arrays: List) -> Dict[str, torch.Ten
 
 
 def compute_payload_bytes(state_dict: Dict[str, torch.Tensor]) -> int:
-    """§5.4 총 통신비용(payload x R) 재료 — 라운드당 payload 크기 측정."""
+    """§5.4 총 통신비용(payload x R) 재료 — 라운드당 payload 크기 측정.
+
+    Ingredient for §5.4 total communication cost (payload x R) — measures
+    the payload size per round.
+    """
     return sum(v.numel() * v.element_size() for v in state_dict.values())

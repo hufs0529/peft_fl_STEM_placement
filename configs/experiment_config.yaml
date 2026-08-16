@@ -7,26 +7,52 @@
 # 이 파일 하나로 core 6개 조합 + Task 2 진단 실험(DoRA, local_epochs=5)을
 # 전부 커버합니다. scripts/run_experiment.py의 --peft --fl --local-epochs
 # 인자가 아래 기본값을 override합니다.
+#
+# Config for the main experiment (Week 4, reflects Task 1/Task 2 of the
+# research proposal).
+#
+# Aim 1 core design (Subtask 1.1/1.2): 3 FL algorithms (FedAvg/FedProx/SCAFFOLD)
+#              x 2 PEFT (LoRA/QLoRA) = 6 combinations, 8 clients, alpha=0.5,
+#              up to 10 rounds, convergence criterion of 3 rounds / <1% improvement
+#
+# This single file covers the core 6 combinations plus the Task 2
+# diagnostic experiments (DoRA, local_epochs=5) in full. The
+# --peft --fl --local-epochs arguments of scripts/run_experiment.py
+# override the defaults below.
 
+# name: model fixed to the one finalized in Week 1
 model:
   name: "Qwen/Qwen2.5-3B-Instruct"   # Week 1에 확정한 모델로 고정
 
 data:
+  # subset_size: null = use the entire Dolly-15k
   subset_size: null              # null = 전체 Dolly-15k 사용
   max_seq_length: 512
+  # holdout_fraction: held-out evaluation set (PPL is computed over this
+  # entire set every round)
   holdout_fraction: 0.1          # held-out 평가셋(PPL은 이 전체로 매 라운드 계산)
+  # rouge_l_sample_size: ROUGE-L requires generation and is expensive ->
+  # category-stratified sample only, once at the last round
   rouge_l_sample_size: 200       # ROUGE-L은 생성이 필요해 비쌈 -> 카테고리 층화 샘플만, 마지막 라운드 1회
 
 federated:
   num_clients: 8
+  # num_rounds: up to 10 rounds (Subtask 1.2)
   num_rounds: 10                 # 최대 10라운드 (Subtask 1.2)
+  # fraction_fit: all 8 clients participate every round
   fraction_fit: 1.0               # 8클라이언트 전원 매 라운드 참여
+  # local_epochs: Subtask 2.2 robustness check: override to 5
   local_epochs: 1                 # Subtask 2.2 강건성 점검: 5로 override
 
 # --- core (Subtask 1.1/1.2): 아래 조합을 6번 실행 ---
 #   (lora, fedavg) / (lora, fedprox) / (lora, scaffold)
 #   (qlora, fedavg) / (qlora, fedprox) / (qlora, scaffold)
 # --- diagnostic (Subtask 2.1): dora를 analyze_interaction.py가 고른 FL과 짝지어 1회 실행 ---
+# --- core (Subtask 1.1/1.2): run the combinations below 6 times ---
+#   (lora, fedavg) / (lora, fedprox) / (lora, scaffold)
+#   (qlora, fedavg) / (qlora, fedprox) / (qlora, scaffold)
+# --- diagnostic (Subtask 2.1): run dora once, paired with the FL
+#     algorithm chosen by analyze_interaction.py ---
 peft:
   type: "lora"
   lora_r: 8
@@ -35,19 +61,25 @@ peft:
 
 fl_algorithm:
   type: "fedavg"
+  # proximal_mu: hyperparameter for fedprox/scaffold
   proximal_mu: 0.01               # fedprox/scaffold 관련 하이퍼파라미터
 
 partitioning:
+  # alpha: fixed value (research proposal Subtask 1.1)
   alpha: 0.5                      # 고정값 (연구계획서 Subtask 1.1)
   min_category_threshold: 150
 
 training:
   optimizer: "adamw"
+  # learning_rate: PyYAML cannot parse "2e-4" (no decimal point) as a
+  # float and parses it as a string instead, so keep the "2.0e-4" format
   learning_rate: 2.0e-4          # PyYAML은 "2e-4"(소수점 없음)를 float로 못 읽고 문자열로 파싱하므로 "2.0e-4" 형식 유지
   micro_batch_size: 4
   grad_accumulation_steps: 4      # effective batch size 16
 
 convergence:
+  # min_improvement_pct: early stop if <1% improvement for 3 consecutive
+  # rounds (Subtask 1.2)
   min_improvement_pct: 1.0        # 3라운드 연속 <1% 개선 시 조기종료 (Subtask 1.2)
   patience_rounds: 3
 
@@ -57,8 +89,11 @@ checkpointing:
   path: "results/checkpoints/experiment/"
 
 logging:
+  # use_wandb: recommended to enable live monitoring starting from Week 4
   use_wandb: true                 # Week 4부터 실시간 모니터링 활성화 권장
   wandb_project: "dolly15k-fl-peft"
   # Subtask 2.3 분석용 로깅 — fl_runner.py가 매 라운드 자동 기록
+  # Logging for Subtask 2.3 analysis — fl_runner.py records this
+  # automatically every round
   log_per_category_metrics: true
   log_communication_bytes: true

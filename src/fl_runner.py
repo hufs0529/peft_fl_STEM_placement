@@ -18,6 +18,33 @@ Strategy 집계 로직을 직접 구현하는 수동 루프를 씁니다. 배선
 (README 알려진 한계 참고). ROUGE-L(생성 필요, 훨씬 비쌈)은 매 라운드가
 아니라 루프 종료 후 최종 global 파라미터 기준 1회만, 카테고리 층화
 샘플(rouge_eval_dataset)에 대해서만 계산한다.
+
+Manual FL round loop — the core execution engine of the research plan.
+
+flwr.simulation.start_simulation() unconditionally runs for a fixed
+num_rounds and makes it hard to stop mid-loop on a convergence criterion or
+resume from a checkpoint, so we use a manual loop that implements the
+Strategy aggregation logic directly. What is wired in:
+
+  - Early stopping via the convergence criterion (Subtask 1.2)
+  - Checkpoint save every round + automatic resume on restart
+  - Subtask 2.3 additional analysis (per-category breakdown, total
+    communication cost)
+  - FedAvg/FedProx use weighted-average aggregation, SCAFFOLD uses the
+    scaffold.py path
+  - (Optional) real-time W&B logging
+
+Evaluation design: PPL is computed every round, using only one representative
+client (clients[0]). Right after aggregation all clients are overwritten with
+the same global parameters and see the same shared held-out set, so
+evaluating all 8 would give the same result (aside from floating-point
+error) — the other 7 evaluations are pure duplicate computation and have
+been removed. Under this design, per-client fairness variance is meaningless
+(all values are identical) and is therefore not computed (see the README's
+Known Limitations). ROUGE-L (requires generation, much more expensive) is
+computed not every round but exactly once, after the loop ends, on the final
+global parameters, over the category-stratified sample
+(rouge_eval_dataset) only.
 """
 
 import json
@@ -106,6 +133,9 @@ def run_federated_training(
         else:
             # FedAvg/FedProx 공통 weighted-average 집계.
             # FedProx의 proximal term은 fl_client.py의 fit()에서 이미 loss에 반영됨.
+            # Common weighted-average aggregation for FedAvg/FedProx.
+            # FedProx's proximal term is already reflected in the loss inside
+            # fit() in fl_client.py.
             total_ex = sum(r["num_examples"] for r in fit_results)
             keys = list(global_state.keys())
             new_state = {k: torch.zeros_like(global_state[k]) for k in keys}
@@ -117,6 +147,9 @@ def run_federated_training(
 
         # PPL 전용 평가: 대표 클라이언트 1개만 (위 모듈 docstring 참고 — 8명 다
         # 평가해도 결과가 동일해 나머지는 순수 중복 계산이었음).
+        # PPL-only evaluation: only one representative client (see the module
+        # docstring above — evaluating all 8 gives the same result, so the
+        # rest were pure duplicate computation).
         set_trainable_state_dict(clients[0].model, global_state)
         val_loss, _n, _metrics = clients[0].evaluate(
             [v.numpy() for v in global_state.values()], {"run_generation_metrics": False}
@@ -154,6 +187,10 @@ def run_federated_training(
     # 기준으로 ROUGE-L 생성 평가를 정확히 1회만 수행 (Subtask 1.2 task
     # performance 지표 중 생성이 필요한 부분 — 비용 통제를 위해 라운드마다
     # 돌리지 않는다).
+    # After the loop ends (early stop on convergence or reaching num_rounds),
+    # run the ROUGE-L generation evaluation exactly once on the final global
+    # parameters (the generation-requiring part of the Subtask 1.2 task
+    # performance metrics — not run every round in order to control cost).
     set_trainable_state_dict(clients[0].model, global_state)
     _, _, final_metrics = clients[0].evaluate(
         [v.numpy() for v in global_state.values()], {"run_generation_metrics": True}

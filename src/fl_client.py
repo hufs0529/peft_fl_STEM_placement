@@ -1,5 +1,8 @@
 """공통 클라이언트 — 계획서 v2 §4.1(warmup), §4.2(FedProx proximal term),
 §5.3(VRAM/latency/ROUGE-L) 전부 통합된 버전.
+
+Common client — the version that integrates plan v2 §4.1 (warmup),
+§4.2 (FedProx proximal term), and §5.3 (VRAM/latency/ROUGE-L) all together.
 """
 
 from typing import Dict, Tuple
@@ -31,6 +34,10 @@ class FlowerClient(NumPyClient):
         # PPL은 held-out 전체(eval_dataset)로 매 라운드 계산하지만, ROUGE-L은
         # 생성이 필요해 훨씬 비싸므로 별도의 (더 작은, 카테고리 층화 샘플)
         # 데이터셋을 쓴다. 안 넘기면 eval_dataset과 동일하게 동작(하위 호환).
+        # PPL is computed every round over the full held-out set (eval_dataset),
+        # but ROUGE-L requires generation and is much more expensive, so it uses
+        # a separate (smaller, category-stratified sample) dataset. If not
+        # passed, it behaves the same as eval_dataset (backward compatible).
         self.rouge_eval_dataset = rouge_eval_dataset if rouge_eval_dataset is not None else eval_dataset
         self.tokenizer = tokenizer
         self.param_keys = list(get_trainable_state_dict(self.model).keys())
@@ -52,6 +59,7 @@ class FlowerClient(NumPyClient):
         optimizer = torch.optim.AdamW((p for p in self.model.parameters() if p.requires_grad), lr=lr)
 
         # 계획서 §4.1: 첫 라운드에만 linear warmup
+        # Plan §4.1: linear warmup only on the first round
         total_steps = max(1, len(self.train_loader) // accum_steps) * local_epochs
         scheduler = None
         if server_round == 1:
@@ -60,6 +68,7 @@ class FlowerClient(NumPyClient):
             )
 
         # 계획서 §4.2: FedProx proximal term (mu=0.01)
+        # Plan §4.2: FedProx proximal term (mu=0.01)
         is_fedprox = self.config["fl_algorithm"]["type"] == "fedprox"
         proximal_mu = self.config["fl_algorithm"].get("proximal_mu", 0.01)
         global_ref = None
@@ -132,6 +141,9 @@ class FlowerClient(NumPyClient):
         if run_generation:
             # rouge_eval_dataset은 eval_dataset(PPL 전체)보다 훨씬 작은
             # 카테고리 층화 샘플 — 생성 비용을 통제하기 위함(Subtask 1.2).
+            # rouge_eval_dataset is a category-stratified sample that is much
+            # smaller than eval_dataset (full PPL set) — this is to control
+            # generation cost (Subtask 1.2).
             ds = self.rouge_eval_dataset
             prompts = [ds[i]["prompt"] for i in range(len(ds))]
             references = [ds[i]["reference_response"] for i in range(len(ds))]

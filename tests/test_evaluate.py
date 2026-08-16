@@ -1,4 +1,8 @@
-"""Subtask 2.3 분석 함수 + Subtask 1.3/2.1/2.2 상호작용/선정 로직 단위 테스트."""
+"""Subtask 2.3 분석 함수 + Subtask 1.3/2.1/2.2 상호작용/선정 로직 단위 테스트.
+
+Unit tests for the Subtask 2.3 analysis functions and the Subtask 1.3/2.1/2.2
+interaction/selection logic.
+"""
 
 from src.evaluate import (
     client_fairness_variance,
@@ -36,7 +40,12 @@ def test_total_communication_cost():
 
 def _make_core_runs(fedprox_ppl_qlora=9.5, scaffold_ppl_qlora=9.0):
     """lora에서는 fedprox/scaffold가 fedavg보다 뚜렷이 개선되지만,
-    qlora에서는 fedprox의 개선폭이 줄어드는(상호작용이 있는) 가상 6조합."""
+    qlora에서는 fedprox의 개선폭이 줄어드는(상호작용이 있는) 가상 6조합.
+
+    Synthetic set of 6 combinations where fedprox/scaffold clearly improve
+    over fedavg under lora, but fedprox's improvement shrinks under qlora
+    (i.e., an interaction effect is present).
+    """
     return [
         {"peft": "lora", "fl": "fedavg", "val_perplexity": 10.0},
         {"peft": "lora", "fl": "fedprox", "val_perplexity": 8.0},
@@ -52,14 +61,18 @@ def test_compute_interaction_effects_sign_and_shape():
     effects = compute_interaction_effects(runs, performance_field="val_perplexity")
 
     # lora: fedprox_delta = 10.0 - 8.0 = 2.0 (개선)
+    # lora: fedprox_delta = 10.0 - 8.0 = 2.0 (improvement)
     assert effects["per_peft"]["lora"]["fedprox_delta"] == 2.0
     # qlora: fedprox_delta = 10.5 - 9.5 = 1.0 (개선폭이 줄어듦 -> 상호작용 존재)
+    # qlora: fedprox_delta = 10.5 - 9.5 = 1.0 (improvement shrinks -> interaction exists)
     assert effects["per_peft"]["qlora"]["fedprox_delta"] == 1.0
     assert effects["interaction_fedprox"] == 1.0 - 2.0
 
 
 def test_select_largest_interaction_fl_algorithm_picks_bigger_magnitude():
     # fedprox 상호작용(-1.0)보다 scaffold 상호작용(-2.5)이 더 크게 설계
+    # Designed so the scaffold interaction (-2.5) is larger in magnitude
+    # than the fedprox interaction (-1.0)
     runs = _make_core_runs(fedprox_ppl_qlora=9.5, scaffold_ppl_qlora=10.0)
     effects = compute_interaction_effects(runs, performance_field="val_perplexity")
     assert select_largest_interaction_fl_algorithm(effects) == "scaffold"

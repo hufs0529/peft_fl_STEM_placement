@@ -2,6 +2,11 @@
 계획서 v2에서 SCAFFOLD가 core이므로, FedAvg/FedProx/SCAFFOLD 세 경로
 모두 fl_runner.py의 전체 루프(fit->aggregate->evaluate->checkpoint->
 convergence check)를 에러 없이 도는지 확인.
+
+Step 5: small-scale multi-client FL integration test.
+Since SCAFFOLD is core in plan v2, verifies that all three paths —
+FedAvg/FedProx/SCAFFOLD — run through fl_runner.py's full loop
+(fit->aggregate->evaluate->checkpoint->convergence check) without error.
 """
 
 import shutil
@@ -89,12 +94,16 @@ def test_fedprox_round_loop_runs():
 
 
 def test_scaffold_round_loop_runs():
-    """계획서 v2: SCAFFOLD가 core이므로 전체 루프가 정상 동작해야 함."""
+    """계획서 v2: SCAFFOLD가 core이므로 전체 루프가 정상 동작해야 함.
+
+    Plan v2: since SCAFFOLD is core, the full loop must work correctly.
+    """
     config = make_dev_config("scaffold")
     clients = _make_clients(config)
     result = run_federated_training(config, clients, run_name="test_scaffold_dummy")
     assert result["rounds_run"] >= 1
     # SCAFFOLD 클라이언트는 local_control을 라운드 간 유지해야 함
+    # SCAFFOLD clients must persist local_control across rounds
     for c in clients:
         assert hasattr(c, "local_control")
     shutil.rmtree("results/checkpoints/test_scaffold_dummy", ignore_errors=True)
