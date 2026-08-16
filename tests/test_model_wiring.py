@@ -1,6 +1,4 @@
-"""2단계: 미니어처 모델(gpt2)로 연구계획서의 3개 PEFT 방식(lora/qlora/dora) 배선 검증.
-목적: 성능이 아니라 '에러 없이 학습 가능한 파라미터가 잡히는가'.
-
+"""
 Stage 2: verifies the wiring of the research proposal's 3 PEFT methods
 (lora/qlora/dora) using a miniature model (gpt2).
 Goal: not performance, but whether trainable parameters are captured
@@ -36,8 +34,7 @@ def test_qlora_has_trainable_params():
 
 
 def test_dora_has_trainable_params():
-    """Subtask 2.1 진단 대조군: DoRA (use_dora=True, 양자화 없음).
-
+    """
     Subtask 2.1 diagnostic control: DoRA (use_dora=True, no quantization).
     """
     config = load_dev_config()
@@ -47,8 +44,7 @@ def test_dora_has_trainable_params():
 
 
 def test_unknown_peft_type_raises():
-    """연구계획서 범위 밖 PEFT type은 ValueError — lora/qlora/dora만 정의됨.
-
+    """
     A PEFT type outside the scope of the research proposal raises
     ValueError — only lora/qlora/dora are defined.
     """
@@ -56,7 +52,7 @@ def test_unknown_peft_type_raises():
     config["peft"]["type"] = "adapter_tuning"
     try:
         get_model(config)
-        assert False, "정의되지 않은 peft type은 ValueError가 발생해야 함"
+        assert False, "Expected ValueError for unknown PEFT type"
     except ValueError:
         pass
 

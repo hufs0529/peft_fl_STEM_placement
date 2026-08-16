@@ -38,8 +38,8 @@ def run_single_client_check(config: dict):
         losses.append(output.loss.item())
         print(f"step {step}: loss={output.loss.item():.4f}")
 
-    assert losses[-1] < losses[0], "loss가 감소하지 않음 — 학습 루프 점검 필요"
-    print("single_client 검증 통과: loss가 감소함")
+    assert losses[-1] < losses[0], "loss 'didnt decreased — check training loop"
+    print("single_client validation passed: loss decreased")
 
 
 def main():

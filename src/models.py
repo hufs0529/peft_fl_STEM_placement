@@ -1,13 +1,4 @@
-"""PEFT 래핑 로직 — 연구계획서 Task 1/Task 2와 정확히 일치.
-
-core (Aim 1, Subtask 1.1): LoRA(r=8), QLoRA(NF4 4bit) — 3 FL x 2 PEFT = 6조합.
-diagnostic (Aim 2, Subtask 2.1): DoRA — 양자화 없이 LoRA와 동일한 압축률을
-갖는 대조군. Task 1에서 상호작용 효과가 가장 컸던 FL 알고리즘과만 짝지어
-1회 실행해, 그 효과가 "양자화 노이즈" 때문인지 "압축 자체" 때문인지 분리한다.
-
-Prompt Tuning/Adapter Tuning 등 다른 PEFT 방식은 이번 연구계획서의 범위에
-없으므로 포함하지 않는다.
-
+"""
 PEFT wrapping logic — exactly matches Task 1/Task 2 of the research proposal.
 
 core (Aim 1, Subtask 1.1): LoRA(r=8), QLoRA(NF4 4bit) — 3 FL x 2 PEFT = 6 combinations.
@@ -62,9 +53,6 @@ def get_model(config: dict):
         return get_peft_model(model, lora_cfg)
 
     elif peft_type == "dora":
-        # Subtask 2.1 진단 대조군: 양자화 없는 DoRA. Task 1에서 상호작용
-        # 효과가 가장 컸던 FL 알고리즘과 짝지어 실행해 "양자화 때문"인지
-        # "압축 자체 때문"인지 분리하기 위한 조건.
         # Subtask 2.1 diagnostic control: DoRA without quantization. Run
         # paired with the FL algorithm that showed the largest interaction
         # effect in Task 1, to separate whether it is "due to quantization"
