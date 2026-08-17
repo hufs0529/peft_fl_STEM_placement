@@ -46,9 +46,18 @@ def get_model(config: dict):
         return get_peft_model(model, lora_cfg)
 
     elif peft_type == "qlora":
-        bnb_cfg = BitsAndBytesConfig(
-            load_in_4bit=True, bnb_4bit_quant_type="nf4", bnb_4bit_compute_dtype=torch.bfloat16
-        )
+        # qlora_bits: 압축률 스윕용 — 4(NF4, 기본) 또는 8(INT8). config에 없으면 4bit.
+        # qlora_bits: for the compression-rate sweep — 4 (NF4, default) or 8
+        # (INT8). Defaults to 4-bit if not present in config.
+        qlora_bits = config["peft"].get("qlora_bits", 4)
+        if qlora_bits == 4:
+            bnb_cfg = BitsAndBytesConfig(
+                load_in_4bit=True, bnb_4bit_quant_type="nf4", bnb_4bit_compute_dtype=torch.bfloat16
+            )
+        elif qlora_bits == 8:
+            bnb_cfg = BitsAndBytesConfig(load_in_8bit=True)
+        else:
+            raise ValueError(f"Unknown qlora_bits: {qlora_bits} (4 또는 8만 지원 / only 4 or 8 are supported)")
         model = AutoModelForCausalLM.from_pretrained(
             model_name, quantization_config=bnb_cfg, device_map="auto"
         )
