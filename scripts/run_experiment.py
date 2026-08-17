@@ -43,6 +43,26 @@ Task 2 diagnostic:
     # local_epochs=5
     python scripts/run_experiment.py --peft <best_peft> --fl <best_fl> --local-epochs 5
 
+지도교수 피드백 — 압축률/Dirichlet 강건성 스윕:
+    core 6조합 중 상호작용이 가장 컸던 조합(<best_peft>/<best_fl>) 하나에 한해,
+    --alpha와 --qlora-bits로 α와 압축 비트폭을 스윕한다. 새 값이 core 기본값
+    (α=0.5, 4bit)과 다르면 run_name에 접미사가 붙어 core 결과를 덮어쓰지 않는다.
+
+    python scripts/run_experiment.py --peft <best_peft> --fl <best_fl> --alpha 0.1
+    python scripts/run_experiment.py --peft <best_peft> --fl <best_fl> --alpha 1.0
+    python scripts/run_experiment.py --peft <best_peft> --fl <best_fl> --qlora-bits 8
+
+Advisor feedback — compression-rate / Dirichlet robustness sweep:
+    For the single combination with the largest interaction among the core
+    6 (<best_peft>/<best_fl>), sweep alpha and the quantization bit-width
+    with --alpha and --qlora-bits. When the new value differs from the
+    core default (alpha=0.5, 4-bit), a suffix is appended to run_name so
+    the core results are never overwritten.
+
+    python scripts/run_experiment.py --peft <best_peft> --fl <best_fl> --alpha 0.1
+    python scripts/run_experiment.py --peft <best_peft> --fl <best_fl> --alpha 1.0
+    python scripts/run_experiment.py --peft <best_peft> --fl <best_fl> --qlora-bits 8
+
 Note: be sure to pass pytest tests/ before running.
 """
 
@@ -78,10 +98,29 @@ def load_config(path: str, overrides: dict) -> dict:
 
 
 def build_run_name(config: dict) -> str:
-    return (
+    # alpha/qlora_bits가 core 기본값(0.5, 4bit)과 같으면 기존 run_name 형식을
+    # 그대로 유지 — analyze_interaction.py의 core 6조합 파일명 매칭과의
+    # 하위 호환성을 위함. 기본값과 다를 때만(강건성 스윕) 접미사를 붙여
+    # core 결과를 덮어쓰지 않도록 함.
+    #
+    # If alpha/qlora_bits equal the core defaults (0.5, 4-bit), the run_name
+    # format is left unchanged — this keeps backward compatibility with
+    # analyze_interaction.py's filename matching for the core 6
+    # combinations. A suffix is appended only when they differ from the
+    # defaults (i.e. a robustness sweep run), so sweep runs never overwrite
+    # the core results.
+    name = (
         f"{config['peft']['type']}_{config['fl_algorithm']['type']}"
         f"_ep{config['federated']['local_epochs']}"
     )
+    alpha = config["partitioning"]["alpha"]
+    if alpha != 0.5:
+        name += f"_a{alpha}"
+    if config["peft"]["type"] == "qlora":
+        qlora_bits = config["peft"].get("qlora_bits", 4)
+        if qlora_bits != 4:
+            name += f"_q{qlora_bits}bit"
+    return name
 
 
 def main():
@@ -90,12 +129,27 @@ def main():
     parser.add_argument("--peft", choices=["lora", "qlora", "dora"], required=True)
     parser.add_argument("--fl", choices=["fedavg", "fedprox", "scaffold"], required=True)
     parser.add_argument("--local-epochs", type=int, default=None, help="Subtask 2.2 강건성 점검: 1(기본) vs 5")
+    parser.add_argument(
+        "--alpha", type=float, default=None,
+        help="지도교수 피드백: Dirichlet 비IID 강도 스윕 (기본 0.5, 예: 0.1/1.0) — "
+             "최적 조합 1개에만 적용 권장 / advisor feedback: Dirichlet non-IID "
+             "intensity sweep (default 0.5, e.g. 0.1/1.0) — recommended only for "
+             "the single best-performing combination",
+    )
+    parser.add_argument(
+        "--qlora-bits", type=int, default=None, choices=[4, 8],
+        help="지도교수 피드백: QLoRA 압축 비트폭 스윕 (기본 4, qlora에만 해당) / "
+             "advisor feedback: QLoRA compression bit-width sweep (default 4, "
+             "qlora only)",
+    )
     args = parser.parse_args()
 
     overrides = {
         "peft.type": args.peft,
         "fl_algorithm.type": args.fl,
         "federated.local_epochs": args.local_epochs,
+        "partitioning.alpha": args.alpha,
+        "peft.qlora_bits": args.qlora_bits,
     }
     config = load_config(args.config, overrides)
     run_name = build_run_name(config)
