@@ -20,9 +20,13 @@
 # --peft --fl --local-epochs arguments of scripts/run_experiment.py
 # override the defaults below.
 
-# name: model fixed to the one finalized in Week 1
+# name: 3B에서 1B급으로 축소(지도교수 피드백) — Qwen 계열 유지를 위해
+# Qwen2.5 라인업 중 1B에 가장 가까운 1.5B-Instruct 사용
+# name: downsized from 3B to a ~1B-class model (advisor feedback) — kept
+# within the Qwen family by using Qwen2.5-1.5B-Instruct, the closest
+# available size to 1B in the Qwen2.5 lineup
 model:
-  name: "Qwen/Qwen2.5-3B-Instruct"   # Week 1에 확정한 모델로 고정
+  name: "Qwen/Qwen2.5-1.5B-Instruct"
 
 data:
   # subset_size: null = use the entire Dolly-15k
@@ -58,6 +62,12 @@ peft:
   lora_r: 8
   lora_alpha: 16
   lora_dropout: 0.05
+  # qlora_bits: 압축률 스윕용(지도교수 피드백) — 4(NF4, 기본) 또는 8(INT8).
+  # scripts/run_experiment.py의 --qlora-bits 인자가 이 값을 override.
+  # qlora_bits: for the compression-rate sweep (advisor feedback) — 4
+  # (NF4, default) or 8 (INT8). Overridden by --qlora-bits in
+  # scripts/run_experiment.py.
+  qlora_bits: 4
 
 fl_algorithm:
   type: "fedavg"
@@ -65,8 +75,14 @@ fl_algorithm:
   proximal_mu: 0.01               # fedprox/scaffold 관련 하이퍼파라미터
 
 partitioning:
-  # alpha: fixed value (research proposal Subtask 1.1)
-  alpha: 0.5                      # 고정값 (연구계획서 Subtask 1.1)
+  # alpha: core 6조합의 고정값(연구계획서 Subtask 1.1). 지도교수 피드백에 따라
+  # 최적 조합 1개에 한해 scripts/run_experiment.py의 --alpha 인자로
+  # {0.1, 0.5, 1.0} 등 다른 값을 오버라이드해 강건성을 점검할 수 있음.
+  # alpha: fixed value for the core 6 combinations (research proposal
+  # Subtask 1.1). Per advisor feedback, for the single best-performing
+  # combination this can be overridden via --alpha in
+  # scripts/run_experiment.py (e.g. {0.1, 0.5, 1.0}) to check robustness.
+  alpha: 0.5
   min_category_threshold: 150
 
 training:
