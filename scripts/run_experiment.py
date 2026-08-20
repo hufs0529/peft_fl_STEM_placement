@@ -1,67 +1,49 @@
-"""Week 4 본 실험 실행 진입점.
+"""Week 4 본 실험 실행 진입점 (Week 5 지도교수 피드백으로 설계 개정).
 
-Task 1 core (Subtask 1.2, 6회 실행):
-    python scripts/run_experiment.py --peft lora   --fl fedavg
-    python scripts/run_experiment.py --peft lora   --fl fedprox
-    python scripts/run_experiment.py --peft lora   --fl scaffold
-    python scripts/run_experiment.py --peft qlora  --fl fedavg
-    python scripts/run_experiment.py --peft qlora  --fl fedprox
-    python scripts/run_experiment.py --peft qlora  --fl scaffold
+Core design (개정): 압축률(3) x FL(2) x Dirichlet alpha(3) = 18회 실행.
+지도교수 피드백: 이 연구의 중점을 "압축률과 non-IID 강도의 상관관계"로
+재설정 — SCAFFOLD는 core 설계에서 제외(코드/테스트는 그대로 유지).
 
-6개가 모두 끝나면 scripts/analyze_interaction.py를 실행해 Subtask 1.3
-상호작용 효과와, 아래 Task 2 진단 실험에 쓸 조합을 확인한다.
+    for compression in lora "qlora --qlora-bits 8" "qlora --qlora-bits 4"; do
+      for fl in fedavg fedprox; do
+        for alpha in 0.1 0.5 1.0; do
+          python scripts/run_experiment.py --peft $compression --fl $fl --alpha $alpha
+        done
+      done
+    done
+
+18개가 모두 끝나면 scripts/analyze_interaction.py를 실행해 압축률 x alpha
+상관관계와, Task 2 진단 실험(local_epochs=5)에 쓸 조합을 확인한다.
 
 Task 2 diagnostic:
-    # Subtask 2.1 — DoRA를 <largest_interaction_fl>과 짝지어 양자화 vs 압축 분리
-    python scripts/run_experiment.py --peft dora --fl <largest_interaction_fl>
-
-    # Subtask 2.2 — 성능이 가장 좋았던 core 조합을 local_epochs=5로 재실행
-    python scripts/run_experiment.py --peft <best_peft> --fl <best_fl> --local-epochs 5
+    # Subtask 2.2 — 성능이 가장 좋았던 조합을 local_epochs=5로 재실행
+    python scripts/run_experiment.py --peft <best_peft> --fl <best_fl> --alpha <best_alpha> [--qlora-bits 8] --local-epochs 5
 
 주의: 실행 전 반드시 pytest tests/ 로 검증을 통과시킬 것.
 
-Entry point for running the Week 4 main experiment.
+Entry point for running the Week 4 main experiment (design revised in
+Week 5 per advisor feedback).
 
-Task 1 core (Subtask 1.2, run 6 times):
-    python scripts/run_experiment.py --peft lora   --fl fedavg
-    python scripts/run_experiment.py --peft lora   --fl fedprox
-    python scripts/run_experiment.py --peft lora   --fl scaffold
-    python scripts/run_experiment.py --peft qlora  --fl fedavg
-    python scripts/run_experiment.py --peft qlora  --fl fedprox
-    python scripts/run_experiment.py --peft qlora  --fl scaffold
+Core design (revised): compression (3) x FL (2) x Dirichlet alpha (3) =
+18 runs. Advisor feedback reframed this project's focus as "the
+correlation between compression rate and non-IID intensity" — SCAFFOLD
+is dropped from the core design (its code/tests are kept).
 
-Once all 6 are finished, run scripts/analyze_interaction.py to check the
-Subtask 1.3 interaction effects and the combination to use for the Task 2
-diagnostic experiments below.
+    for compression in lora "qlora --qlora-bits 8" "qlora --qlora-bits 4"; do
+      for fl in fedavg fedprox; do
+        for alpha in 0.1 0.5 1.0; do
+          python scripts/run_experiment.py --peft $compression --fl $fl --alpha $alpha
+        done
+      done
+    done
+
+Once all 18 are finished, run scripts/analyze_interaction.py to check the
+compression x alpha correlation and the combination to use for the Task 2
+diagnostic experiment below.
 
 Task 2 diagnostic:
-    # Subtask 2.1 — pair DoRA with <largest_interaction_fl> to isolate
-    # quantization vs. compression
-    python scripts/run_experiment.py --peft dora --fl <largest_interaction_fl>
-
-    # Subtask 2.2 — rerun the best-performing core combination with
-    # local_epochs=5
-    python scripts/run_experiment.py --peft <best_peft> --fl <best_fl> --local-epochs 5
-
-지도교수 피드백 — 압축률/Dirichlet 강건성 스윕:
-    core 6조합 중 상호작용이 가장 컸던 조합(<best_peft>/<best_fl>) 하나에 한해,
-    --alpha와 --qlora-bits로 α와 압축 비트폭을 스윕한다. 새 값이 core 기본값
-    (α=0.5, 4bit)과 다르면 run_name에 접미사가 붙어 core 결과를 덮어쓰지 않는다.
-
-    python scripts/run_experiment.py --peft <best_peft> --fl <best_fl> --alpha 0.1
-    python scripts/run_experiment.py --peft <best_peft> --fl <best_fl> --alpha 1.0
-    python scripts/run_experiment.py --peft <best_peft> --fl <best_fl> --qlora-bits 8
-
-Advisor feedback — compression-rate / Dirichlet robustness sweep:
-    For the single combination with the largest interaction among the core
-    6 (<best_peft>/<best_fl>), sweep alpha and the quantization bit-width
-    with --alpha and --qlora-bits. When the new value differs from the
-    core default (alpha=0.5, 4-bit), a suffix is appended to run_name so
-    the core results are never overwritten.
-
-    python scripts/run_experiment.py --peft <best_peft> --fl <best_fl> --alpha 0.1
-    python scripts/run_experiment.py --peft <best_peft> --fl <best_fl> --alpha 1.0
-    python scripts/run_experiment.py --peft <best_peft> --fl <best_fl> --qlora-bits 8
+    # Subtask 2.2 — rerun the best-performing combination with local_epochs=5
+    python scripts/run_experiment.py --peft <best_peft> --fl <best_fl> --alpha <best_alpha> [--qlora-bits 8] --local-epochs 5
 
 Note: be sure to pass pytest tests/ before running.
 """
@@ -131,10 +113,9 @@ def main():
     parser.add_argument("--local-epochs", type=int, default=None, help="Subtask 2.2 강건성 점검: 1(기본) vs 5")
     parser.add_argument(
         "--alpha", type=float, default=None,
-        help="지도교수 피드백: Dirichlet 비IID 강도 스윕 (기본 0.5, 예: 0.1/1.0) — "
-             "최적 조합 1개에만 적용 권장 / advisor feedback: Dirichlet non-IID "
-             "intensity sweep (default 0.5, e.g. 0.1/1.0) — recommended only for "
-             "the single best-performing combination",
+        help="지도교수 피드백: Dirichlet 비IID 강도. Core 18조합 설계는 0.1/0.5/1.0 "
+             "전부를 사용 / advisor feedback: Dirichlet non-IID intensity. The core "
+             "18-combination design uses all of 0.1/0.5/1.0",
     )
     parser.add_argument(
         "--qlora-bits", type=int, default=None, choices=[4, 8],

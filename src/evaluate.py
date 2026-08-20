@@ -14,6 +14,10 @@
   FL 알고리즘(상호작용 효과가 가장 컸던 쪽)을 고른다.
 - select_best_performing_combination: Subtask 2.2 local-epoch=5 강건성
   점검에 쓸 "core 6조합 중 성능이 가장 좋은 조합"을 고른다.
+- compute_compression_alpha_trend: 지도교수 피드백(압축률 x Dirichlet
+  강건성 스윕) — 3압축(lora/qlora_8bit/qlora_4bit) x 2FL(fedavg/fedprox)
+  x 3alpha(0.1/0.5/1.0) 18조합에서, non-IID가 강해질수록(alpha가
+  작을수록) 압축 페널티가 커지는지를 Pearson 상관계수로 정량화한다.
 
 Analysis functions computed from data that is already logged, at no extra
 GPU cost.
@@ -37,6 +41,12 @@ GPU cost.
 - select_best_performing_combination: picks "the best-performing
   combination among the core 6 combinations" to use for the Subtask 2.2
   local-epoch=5 robustness check.
+- compute_compression_alpha_trend: advisor feedback (compression-rate x
+  Dirichlet robustness sweep) — over the 18 combinations formed by 3
+  compression levels (lora/qlora_8bit/qlora_4bit) x 2 FL algorithms
+  (fedavg/fedprox) x 3 alpha values (0.1/0.5/1.0), quantifies via a
+  Pearson correlation coefficient whether the compression penalty grows
+  as non-IID intensity increases (alpha decreases).
 """
 
 from collections import defaultdict
@@ -153,3 +163,68 @@ def select_best_performing_combination(run_results: List[dict], performance_fiel
     (performance_field is lower-is-better). Communication cost is not
     considered — this is based purely on task performance."""
     return min(run_results, key=lambda r: r[performance_field])
+
+
+def compute_compression_alpha_trend(
+    run_results: List[dict], performance_field: str = "val_perplexity"
+) -> Dict[str, dict]:
+    """지도교수 피드백: 압축률(compression) x Dirichlet 비IID 강도(alpha)
+    상관관계 분석.
+
+    각 (fl, alpha) 지점에서 "압축 페널티" = QLoRA-4bit 성능 - LoRA(무압축)
+    성능을 구한다(performance_field는 낮을수록 좋다고 가정하므로, 양수면
+    압축이 성능을 해쳤다는 뜻). alpha가 작아질수록(non-IID가 강해질수록)
+    이 페널티가 커지는 경향이 있는지 Pearson 상관계수로 확인한다.
+
+    상관계수가 음수: alpha가 작을수록(non-IID가 강할수록) 페널티가
+    커짐 -> 압축과 non-IID가 서로를 증폭시킴(악화 방향의 상호작용).
+    0에 가까움: 압축 페널티가 non-IID 강도와 무관 -> 두 축이 독립적.
+
+    run_results: [{"compression": "lora"|"qlora_8bit"|"qlora_4bit",
+                    "fl": "fedavg"|"fedprox", "alpha": float,
+                    performance_field: float, ...}, ...] (18개 조합)
+
+    Advisor feedback: analyzes the correlation between compression rate
+    and Dirichlet non-IID intensity (alpha).
+
+    For each (fl, alpha) point, computes the "compression penalty" =
+    QLoRA-4bit performance - LoRA (uncompressed) performance
+    (performance_field is assumed lower-is-better, so a positive value
+    means compression hurt performance). Checks via a Pearson correlation
+    coefficient whether this penalty tends to grow as alpha decreases
+    (non-IID intensity increases).
+
+    Negative correlation: the penalty grows as alpha decreases (stronger
+    non-IID) -> compression and non-IID amplify each other (an adverse
+    interaction). Near zero: the compression penalty is independent of
+    non-IID intensity -> the two axes are independent.
+
+    run_results: [{"compression": "lora"|"qlora_8bit"|"qlora_4bit",
+                    "fl": "fedavg"|"fedprox", "alpha": float,
+                    performance_field: float, ...}, ...] (the 18 combinations)
+    """
+    import numpy as np
+
+    by_key = {(r["fl"], r["alpha"], r["compression"]): r[performance_field] for r in run_results}
+    alphas = sorted({r["alpha"] for r in run_results})
+    fls = sorted({r["fl"] for r in run_results})
+
+    trends: Dict[str, dict] = {}
+    for fl in fls:
+        penalties = [by_key[(fl, alpha, "qlora_4bit")] - by_key[(fl, alpha, "lora")] for alpha in alphas]
+        # penalties가 전부 동일(분산 0)하면 numpy가 0으로 나누기 때문에
+        # 상관계수가 NaN이 됨 -> "alpha와 무관하다"는 의미로 0.0을 명시적으로 반환.
+        # If penalties have zero variance (all identical), numpy divides by
+        # zero and the correlation becomes NaN -> explicitly return 0.0 to
+        # mean "independent of alpha".
+        if len(alphas) > 1 and len(set(penalties)) > 1:
+            correlation = float(np.corrcoef(alphas, penalties)[0, 1])
+        else:
+            correlation = 0.0
+        trends[fl] = {
+            "alphas": alphas,
+            "compression_penalty": penalties,
+            "alpha_penalty_correlation": correlation,
+        }
+
+    return trends
