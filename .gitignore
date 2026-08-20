@@ -1,6 +1,7 @@
 results/checkpoints/
 results/logs/*.jsonl
 results/logs/*.json
+results/figures/
 __pycache__/
 *.pyc
 .venv/

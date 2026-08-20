@@ -10,3 +10,4 @@ evaluate
 rouge-score
 wandb
 numpy
+matplotlib
