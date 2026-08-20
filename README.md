@@ -19,8 +19,8 @@ persist as PEFT quantization intensifies (LoRA→QLoRA)?
 | Week 1 | 모델+GPU 환경 확인, PEFT 배선(LoRA/QLoRA/DoRA) | ✅ 완료 |
 | Week 2 | Dolly-15k 파이프라인, 파라미터 왕복, Dirichlet(α=0.5) 파티셔닝 | ✅ 완료 |
 | **Week 3** | FedProx/SCAFFOLD 통합, 체크포인트/수렴 기준, FL 통합 테스트 | ✅ 완료 (이 브랜치) |
-| Week 4 | Core 6조합 실행 + DoRA/local-epoch 진단 | 예정 (`week4`) |
-| Week 5 | 상호작용 분석 + 카테고리별/수렴궤적 진단 | 예정 |
+| Week 4 | Core 실험 실행(3압축×2FL×3α=18조합) + local-epoch 진단 | 예정 (`week4`) |
+| Week 5 | 압축률×non-IID 상관관계 분석 + 카테고리별 진단 | 예정 |
 | Week 6 | 최종 리포트 | 예정 |
 
 | Week | Goal | Status |
@@ -28,8 +28,8 @@ persist as PEFT quantization intensifies (LoRA→QLoRA)?
 | Week 1 | Verify model + GPU environment, wire up PEFT (LoRA/QLoRA/DoRA) | ✅ Done |
 | Week 2 | Dolly-15k pipeline, parameter round-trip, Dirichlet (α=0.5) partitioning | ✅ Done |
 | **Week 3** | FedProx/SCAFFOLD integration, checkpoint/convergence criteria, FL integration tests | ✅ Done (this branch) |
-| Week 4 | Run core 6 combinations + DoRA/local-epoch diagnostics | Planned (`week4`) |
-| Week 5 | Interaction analysis + per-category/convergence-trajectory diagnostics | Planned |
+| Week 4 | Run the core experiment (3 compression × 2 FL × 3 alpha = 18 combinations) + local-epoch diagnostic | Planned (`week4`) |
+| Week 5 | Compression×non-IID correlation analysis + per-category diagnostics | Planned |
 | Week 6 | Final report | Planned |
 
 ---
@@ -168,14 +168,18 @@ all 8, since each client has different local data.)
 pytest tests/test_convergence.py tests/test_checkpointing.py tests/test_fl_integration.py -v
 ```
 
-**테스트 결과**: 18 passed, 1 skipped(QLoRA, GPU 필요) — Week 1~3 테스트 전체 통과.
+**테스트 결과**: 18 passed, 2 skipped(QLoRA 4bit/8bit, GPU 필요) — Week 1~3 테스트 전체 통과.
 
-**Test results**: 18 passed, 1 skipped (QLoRA, requires GPU) — all Week 1–3
-tests pass.
+**Test results**: 18 passed, 2 skipped (QLoRA 4-bit/8-bit, requires GPU) — all
+Week 1–3 tests pass.
 
 ---
 
 ## 다음 주 (Week 4) 예고 (Preview of Next Week — Week 4)
+
+**(Week 5 갱신)** 아래 예고는 원래 계획(core 6조합)이며, 실제로는 Week 5에
+지도교수 피드백을 받아 압축률×Dirichlet 스윕 중심의 18조합 설계로
+바뀌었습니다 — 자세한 내용은 `week5`/`week6` 브랜치 참고.
 
 - `configs/experiment_config.yaml`: Qwen2.5-3B, 8클라이언트, 최대 10라운드 본실험 설정
 - `src/evaluate.py`: 상호작용 효과 계산(`compute_interaction_effects`) — 이 프로젝트의
@@ -185,13 +189,15 @@ tests pass.
 
 → `week4` 브랜치 참고.
 
-- `configs/experiment_config.yaml`: Qwen2.5-3B, 8 clients, main-experiment
-  config with up to 10 rounds
-- `src/evaluate.py`: interaction effect computation
-  (`compute_interaction_effects`) — the core deliverable of this project
-- `scripts/run_experiment.py`: CLI to run the core 6 combinations + Task 2
-  diagnostics
-- `scripts/analyze_interaction.py`: results analysis + automatic selection of
-  DoRA/local-epoch targets
+**(Week 5 update)** The preview below reflects the original plan (core 6
+combinations); it was actually revised in Week 5, per advisor feedback,
+into an 18-combination design centered on a compression-rate × Dirichlet
+sweep — see the `week5`/`week6` branches for details.
+
+- `configs/experiment_config.yaml`: main-experiment config for Qwen2.5-3B, 8 clients, up to 10 rounds
+- `src/evaluate.py`: interaction-effect computation (`compute_interaction_effects`) — this
+  project's key deliverable
+- `scripts/run_experiment.py`: CLI for running the core 6 combinations + Task 2 diagnostics
+- `scripts/analyze_interaction.py`: result analysis + automatic selection of the DoRA/local-epoch target
 
 → See the `week4` branch.
