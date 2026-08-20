@@ -90,12 +90,15 @@ persist as PEFT quantization (LoRA→QLoRA) becomes more aggressive?
 - Held-out은 **전역 공유**(클라이언트별로 나누지 않음) — 이유는 Week 6 한계 항목 참고.
 - α=0.5는 **고정값**입니다. 원래 계획서 초안에는 α 스윕(1.0/0.5/0.1)이 있었지만,
   6주 스코프 안에서 핵심 질문(교정×양자화 상호작용)에 직접 필요하지 않아 제외했습니다.
+  **(Week 5 갱신)** 지도교수 피드백으로 이 α 스윕은 다시 core 설계에
+  포함됐습니다 — 자세한 내용은 `week5`/`week6` 브랜치 참고.
 
 - The held-out set is **shared globally** (not split per client) — see the Week 6 limitations
   section for the rationale.
 - α=0.5 is a **fixed value**. The original draft plan included an α sweep (1.0/0.5/0.1), but it
   was dropped within the 6-week scope since it is not directly required for the core question
-  (correction × quantization interaction).
+  (correction × quantization interaction). **(Week 5 update)** This α sweep was reinstated into
+  the core design following advisor feedback — see the `week5`/`week6` branches for details.
 
 ---
 
@@ -105,9 +108,9 @@ persist as PEFT quantization (LoRA→QLoRA) becomes more aggressive?
 pytest tests/test_model_wiring.py tests/test_roundtrip.py tests/test_partitioning.py -v
 ```
 
-**테스트 결과**: 9 passed, 1 skipped(QLoRA, GPU 필요)
+**테스트 결과**: 9 passed, 2 skipped(QLoRA 4bit/8bit, GPU 필요)
 
-**Test results**: 9 passed, 1 skipped (QLoRA, requires GPU)
+**Test results**: 9 passed, 2 skipped (QLoRA 4-bit/8-bit, requires GPU)
 
 ---
 
