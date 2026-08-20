@@ -1,24 +1,33 @@
-# 본 실험용 config (Week 4, 연구계획서 Task 1/Task 2 반영)
+# 본 실험용 config (Week 4, 연구계획서 Task 1/Task 2 반영, Week 5 지도교수
+# 피드백으로 설계 개정)
 #
-# Aim 1 core design (Subtask 1.1/1.2): 3 FL algorithms(FedAvg/FedProx/SCAFFOLD)
-#              x 2 PEFT(LoRA/QLoRA) = 6 combinations, 8 clients, alpha=0.5,
-#              최대 10라운드, 3라운드/<1%개선 수렴 기준
+# 개정된 core design: 압축률(LoRA=무압축/QLoRA 8bit/QLoRA 4bit) x
+#              FL(FedAvg/FedProx) x Dirichlet alpha(0.1/0.5/1.0)
+#              = 18 combinations, 8 clients, 최대 10라운드,
+#              3라운드/<1%개선 수렴 기준. 지도교수 피드백: 이 연구의
+#              중점을 "압축률과 non-IID 강도의 상관관계"로 재설정 —
+#              SCAFFOLD는 core 설계에서 제외(코드/테스트는 유지).
 #
-# 이 파일 하나로 core 6개 조합 + Task 2 진단 실험(DoRA, local_epochs=5)을
-# 전부 커버합니다. scripts/run_experiment.py의 --peft --fl --local-epochs
-# 인자가 아래 기본값을 override합니다.
+# 이 파일 하나로 18개 조합 + Task 2 진단 실험(local_epochs=5)을 전부
+# 커버합니다. scripts/run_experiment.py의 --peft --fl --alpha
+# --qlora-bits --local-epochs 인자가 아래 기본값을 override합니다.
 #
 # Config for the main experiment (Week 4, reflects Task 1/Task 2 of the
-# research proposal).
+# research proposal; design revised in Week 5 per advisor feedback).
 #
-# Aim 1 core design (Subtask 1.1/1.2): 3 FL algorithms (FedAvg/FedProx/SCAFFOLD)
-#              x 2 PEFT (LoRA/QLoRA) = 6 combinations, 8 clients, alpha=0.5,
-#              up to 10 rounds, convergence criterion of 3 rounds / <1% improvement
+# Revised core design: compression (LoRA=uncompressed / QLoRA 8-bit /
+#              QLoRA 4-bit) x FL (FedAvg/FedProx) x Dirichlet alpha
+#              (0.1/0.5/1.0) = 18 combinations, 8 clients, up to 10
+#              rounds, convergence criterion of 3 rounds / <1%
+#              improvement. Advisor feedback reframed this project's
+#              focus as "the correlation between compression rate and
+#              non-IID intensity" — SCAFFOLD is dropped from the core
+#              design (its code/tests are kept).
 #
-# This single file covers the core 6 combinations plus the Task 2
-# diagnostic experiments (DoRA, local_epochs=5) in full. The
-# --peft --fl --local-epochs arguments of scripts/run_experiment.py
-# override the defaults below.
+# This single file covers the 18 combinations plus the Task 2
+# diagnostic experiment (local_epochs=5) in full. The
+# --peft --fl --alpha --qlora-bits --local-epochs arguments of
+# scripts/run_experiment.py override the defaults below.
 
 # name: 3B에서 1B급으로 축소(지도교수 피드백) — Qwen 계열 유지를 위해
 # Qwen2.5 라인업 중 1B에 가장 가까운 1.5B-Instruct 사용
@@ -48,15 +57,18 @@ federated:
   # local_epochs: Subtask 2.2 robustness check: override to 5
   local_epochs: 1                 # Subtask 2.2 강건성 점검: 5로 override
 
-# --- core (Subtask 1.1/1.2): 아래 조합을 6번 실행 ---
-#   (lora, fedavg) / (lora, fedprox) / (lora, scaffold)
-#   (qlora, fedavg) / (qlora, fedprox) / (qlora, scaffold)
-# --- diagnostic (Subtask 2.1): dora를 analyze_interaction.py가 고른 FL과 짝지어 1회 실행 ---
-# --- core (Subtask 1.1/1.2): run the combinations below 6 times ---
-#   (lora, fedavg) / (lora, fedprox) / (lora, scaffold)
-#   (qlora, fedavg) / (qlora, fedprox) / (qlora, scaffold)
-# --- diagnostic (Subtask 2.1): run dora once, paired with the FL
-#     algorithm chosen by analyze_interaction.py ---
+# --- core (지도교수 피드백 반영 개정): 아래 18개 조합을 실행 ---
+#   compression x fl x alpha, 예: --peft lora --fl fedavg --alpha 0.1
+#   (lora | qlora --qlora-bits 8 | qlora --qlora-bits 4)
+#     x (fedavg | fedprox) x (--alpha 0.1 | 0.5 | 1.0)
+#   scripts/analyze_interaction.py가 18개 로그를 모아 압축률 x alpha
+#   상관관계를 계산.
+# --- core (revised per advisor feedback): run the 18 combinations below ---
+#   compression x fl x alpha, e.g. --peft lora --fl fedavg --alpha 0.1
+#   (lora | qlora --qlora-bits 8 | qlora --qlora-bits 4)
+#     x (fedavg | fedprox) x (--alpha 0.1 | 0.5 | 1.0)
+#   scripts/analyze_interaction.py aggregates the 18 logs to compute the
+#   compression x alpha correlation.
 peft:
   type: "lora"
   lora_r: 8
@@ -75,13 +87,13 @@ fl_algorithm:
   proximal_mu: 0.01               # fedprox/scaffold 관련 하이퍼파라미터
 
 partitioning:
-  # alpha: core 6조합의 고정값(연구계획서 Subtask 1.1). 지도교수 피드백에 따라
-  # 최적 조합 1개에 한해 scripts/run_experiment.py의 --alpha 인자로
-  # {0.1, 0.5, 1.0} 등 다른 값을 오버라이드해 강건성을 점검할 수 있음.
-  # alpha: fixed value for the core 6 combinations (research proposal
-  # Subtask 1.1). Per advisor feedback, for the single best-performing
-  # combination this can be overridden via --alpha in
-  # scripts/run_experiment.py (e.g. {0.1, 0.5, 1.0}) to check robustness.
+  # alpha: 기본값(0.5)일 뿐, 18조합 설계에서는 scripts/run_experiment.py의
+  # --alpha 인자로 {0.1, 0.5, 1.0} 세 값 전부를 실제로 스윕함(지도교수 피드백
+  # — 압축률x non-IID 상관관계가 이 실험의 핵심 축).
+  # alpha: just the default (0.5) here — in the 18-combination design, all
+  # three values {0.1, 0.5, 1.0} are actually swept via --alpha in
+  # scripts/run_experiment.py (advisor feedback — the compression x
+  # non-IID correlation is the core axis of this experiment).
   alpha: 0.5
   min_category_threshold: 150
 
