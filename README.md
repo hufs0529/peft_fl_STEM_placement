@@ -134,7 +134,8 @@ is far more expensive.
 - `test_fl_integration.py`: FedAvg/FedProx/SCAFFOLD **세 경로 모두** 전체
   루프(fit→집계→평가→체크포인트→수렴판정)를 에러 없이 통과하는지,
   SCAFFOLD의 `local_control`이 라운드 간 유지되는지, FedProx의 proximal
-  term이 실제로 동작하는지
+  term이 실제로 동작하는지, `peak_vram_gb`/`total_latency_sec`가 제대로
+  집계되는지(아래 8번)
 
 ### 7. Validation
 - `test_convergence.py`, `test_checkpointing.py`: standalone validation of
@@ -142,8 +143,50 @@ is far more expensive.
 - `test_fl_integration.py`: verifies that **all three paths** — FedAvg,
   FedProx, and SCAFFOLD — pass through the full loop (fit → aggregate →
   evaluate → checkpoint → convergence judgment) without error, that
-  SCAFFOLD's `local_control` is preserved across rounds, and that FedProx's
-  proximal term actually takes effect
+  SCAFFOLD's `local_control` is preserved across rounds, that FedProx's
+  proximal term actually takes effect, and that `peak_vram_gb`/
+  `total_latency_sec` are aggregated correctly (see 8 below)
+
+### 8. 압축률×non-IID 트레이드오프 지표 보강 (지도교수 피드백 반영, `fl_runner.py`)
+`fl_client.py`의 `fit()`은 원래부터 `peak_vram_gb`/`latency_sec`을
+계산해서 반환하고 있었지만, `fl_runner.py`의 라운드 루프는 이 값을
+`round_record`에 옮기지 않고 그냥 버리고 있었습니다 — Week 4~6에서 계획된
+"압축률(LoRA/QLoRA 8bit/4bit) × non-IID(α) 트레이드오프" 분석에는 메모리·
+비용 지표가 반드시 필요한데, 그동안 계산은 되고 로그에는 안 남는 상태였던
+것입니다. 이번에 고친 내용:
+
+- `round_record["peak_vram_gb"]`: 그 라운드에 참여한 클라이언트들의
+  `peak_vram_gb` 평균 (FedAvg/FedProx만 — SCAFFOLD는 아래 참고)
+- 최종 반환값에 `avg_peak_vram_gb`(전체 라운드 평균), `total_latency_sec`
+  (`round_latency_sec` 총합) 추가 — `total_communication_bytes`와 짝을
+  맞춰, 압축×α 상관분석(`compute_compression_alpha_trend`)에 그대로
+  넣을 수 있게 함
+- SCAFFOLD는 `scaffold_client_fit()`이 이 계측을 하지 않아 `peak_vram_gb`가
+  **`None`으로 명시적으로 남습니다** — 0으로 얼버무리면 "측정했더니
+  0GB"로 오인될 수 있기 때문입니다. core 압축×non-IID 분석에서는 애초에
+  SCAFFOLD가 빠지므로 의도적으로 계측을 추가하지 않았습니다.
+
+### 8. Compression × non-IID trade-off metric fix (advisor feedback, `fl_runner.py`)
+`fl_client.py`'s `fit()` was already computing and returning
+`peak_vram_gb`/`latency_sec`, but `fl_runner.py`'s round loop was
+discarding them instead of copying them into `round_record` — the
+"compression (LoRA/QLoRA 8-bit/4-bit) × non-IID (α) trade-off" analysis
+planned for Weeks 4–6 needs memory/cost metrics, which were being computed
+but never logged. What changed:
+
+- `round_record["peak_vram_gb"]`: the average `peak_vram_gb` across the
+  clients that participated in that round (FedAvg/FedProx only — see
+  SCAFFOLD below)
+- Added `avg_peak_vram_gb` (averaged across all rounds) and
+  `total_latency_sec` (sum of `round_latency_sec`) to the final return
+  value, mirroring `total_communication_bytes`, so they can be fed
+  directly into `compute_compression_alpha_trend` for the compression × α
+  correlation analysis
+- SCAFFOLD's `scaffold_client_fit()` doesn't perform this measurement, so
+  its `peak_vram_gb` stays **explicitly `None`** — papering over it as 0
+  could be misread as "measured and it was 0GB". SCAFFOLD is already
+  excluded from the core compression × non-IID analysis, so it was
+  deliberately left uninstrumented.
 
 ### 설계 노트: 왜 PPL을 클라이언트 1개로만 재는가
 집계 직후 8개 클라이언트는 전부 **동일한 global 파라미터**로 덮어써지고
@@ -168,10 +211,11 @@ all 8, since each client has different local data.)
 pytest tests/test_convergence.py tests/test_checkpointing.py tests/test_fl_integration.py -v
 ```
 
-**테스트 결과**: 18 passed, 2 skipped(QLoRA 4bit/8bit, GPU 필요) — Week 1~3 테스트 전체 통과.
+**테스트 결과**: `pytest tests/ -m "not network"` 기준 22 passed, 2 skipped(QLoRA
+4bit/8bit, GPU 필요) — Week 1~3 테스트 전체 통과.
 
-**Test results**: 18 passed, 2 skipped (QLoRA 4-bit/8-bit, requires GPU) — all
-Week 1–3 tests pass.
+**Test results**: 22 passed, 2 skipped (QLoRA 4-bit/8-bit, requires GPU),
+based on `pytest tests/ -m "not network"` — all Week 1–3 tests pass.
 
 ---
 
