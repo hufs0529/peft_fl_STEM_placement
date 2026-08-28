@@ -4,8 +4,9 @@
 3압축(lora/qlora_8bit/qlora_4bit) x 2FL(fedavg/fedprox) x 3alpha(0.1/1/10)
 = 18개 실행 로그를 모두 읽어:
   1) 압축률 x Dirichlet alpha 격자표 출력
-  2) 압축 페널티(4bit - 무압축)가 alpha가 작아질수록(non-IID가 강해질수록)
-     커지는지 Pearson 상관계수로 확인 (src/evaluate.py::compute_compression_alpha_trend)
+  2) 압축 페널티(4bit/8bit 각각 - 무압축)가 alpha가 작아질수록(non-IID가
+     강해질수록) 커지는지 Pearson 상관계수로 확인, PPL/ROUGE-L(높을수록
+     좋음, higher_is_better=True) 둘 다 (src/evaluate.py::compute_compression_alpha_trend)
   3) Subtask 2.2: local_epochs=5 강건성 점검에 쓸 "18조합 중 성능이 가장
      좋은 조합" 결정
 
@@ -28,8 +29,10 @@ Reads the logs of all 18 runs formed by 3 compression levels
 values (0.1/1/10) to:
   1) print a compression x Dirichlet-alpha grid,
   2) check via a Pearson correlation coefficient whether the compression
-     penalty (4-bit minus uncompressed) grows as alpha decreases (non-IID
-     intensity increases) (src/evaluate.py::compute_compression_alpha_trend),
+     penalty (4-bit and 8-bit, each minus uncompressed) grows as alpha
+     decreases (non-IID intensity increases), for both PPL and ROUGE-L
+     (higher-is-better, higher_is_better=True)
+     (src/evaluate.py::compute_compression_alpha_trend),
   3) Subtask 2.2: pick "the best-performing combination among the 18" to
      use for the local_epochs=5 robustness check.
 
@@ -123,11 +126,27 @@ def main():
             print(f"{compression:12s} {fl:10s} {cells}")
 
     print("\n=== 압축률 x Dirichlet alpha 상관관계 (PPL 기준) ===")
-    trend = compute_compression_alpha_trend(run_results, performance_field="val_perplexity")
-    for fl, t in trend.items():
-        print(f"  {fl}: alpha={t['alphas']}  압축_페널티(4bit-무압축)={[round(p, 4) for p in t['compression_penalty']]}")
-        print(f"       alpha-페널티 상관계수 = {t['alpha_penalty_correlation']:+.4f}"
-              " (음수면 non-IID가 강할수록 압축 페널티가 커짐 = 상호작용 있음)")
+    for compression in ("qlora_4bit", "qlora_8bit"):
+        trend = compute_compression_alpha_trend(run_results, performance_field="val_perplexity", compression=compression)
+        print(f"-- {compression} vs lora --")
+        for fl, t in trend.items():
+            print(f"  {fl}: alpha={t['alphas']}  압축_페널티({compression}-무압축)={[round(p, 4) for p in t['compression_penalty']]}")
+            print(f"       alpha-페널티 상관계수 = {t['alpha_penalty_correlation']:+.4f}"
+                  " (음수면 non-IID가 강할수록 압축 페널티가 커짐 = 상호작용 있음)")
+    print("  (4bit 상관계수가 8bit보다 더 음수면: 압축이 강할수록 non-IID 민감도도 커지는 dose-response)")
+
+    if all(r.get("rouge_l") is not None for r in run_results):
+        print("\n=== 압축률 x Dirichlet alpha 상관관계 (ROUGE-L 기준, 높을수록 좋음) ===")
+        for compression in ("qlora_4bit", "qlora_8bit"):
+            trend = compute_compression_alpha_trend(
+                run_results, performance_field="rouge_l", compression=compression, higher_is_better=True,
+            )
+            print(f"-- {compression} vs lora --")
+            for fl, t in trend.items():
+                print(f"  {fl}: alpha={t['alphas']}  압축_페널티({compression}-무압축)={[round(p, 4) for p in t['compression_penalty']]}")
+                print(f"       alpha-페널티 상관계수 = {t['alpha_penalty_correlation']:+.4f}")
+    else:
+        print("\n(일부 run에 rouge_l이 없어 ROUGE-L 기준 상관분석은 건너뜀)")
 
     conv_trend = compute_compression_alpha_trend(run_results, performance_field="rounds_run")
     print("\n=== 압축률 x Dirichlet alpha 상관관계 (수렴 속도 rounds_run 기준, 완전 무료로 이미 로깅된 값) ===")

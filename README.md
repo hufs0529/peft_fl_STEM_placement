@@ -99,6 +99,77 @@ Week 1~5에서 만든 모든 모듈(개정된 설계 포함)을 커버합니다.
 As of this point, **the full test suite is complete** — `pytest tests/`
 covers every module built across Week 1–5, including the revised design.
 
+### `compute_compression_alpha_trend` 보강: ROUGE-L 부호, qlora_8bit 비교, 카테고리별 취약도 (Hardening `compute_compression_alpha_trend`: ROUGE-L Sign, qlora_8bit Comparison, Per-Category Vulnerability)
+
+`compute_compression_alpha_trend`는 원래 "낮을수록 좋음"(PPL) 가정으로
+페널티 부호를 정했는데, 그대로 ROUGE-L(높을수록 좋음)을 넣으면 "압축이
+성능을 해쳤다"는 의미가 반대로 뒤집히는 문제가 있었습니다. 세 가지를
+보강했습니다:
+
+- `higher_is_better=False`(기본, 하위호환) 인자 추가 — ROUGE-L처럼
+  높을수록 좋은 지표는 `higher_is_better=True`로 넘기면 부호 변환 없이
+  그대로 쓸 수 있습니다.
+- `compression="qlora_4bit"`(기본) 인자 추가 — `"qlora_8bit"`을 넘겨서
+  같은 함수를 한 번 더 호출하면, "4bit가 8bit보다 non-IID에 더
+  민감한가"(dose-response)를 두 상관계수로 비교할 수 있습니다.
+- `per_category_compression_penalty()` 신규 추가 — 같은 상관관계 분석을
+  카테고리 단위로 쪼개서, 어떤 태스크 카테고리가 압축×non-IID 상호작용에
+  특히 취약한지 상대 페널티의 z-score로 스크리닝합니다(카테고리가 8종뿐이라
+  엄밀한 유의성 검정이 아니라 상대적 순위 매기기 용도).
+
+`scripts/analyze_interaction.py`는 이제 4bit/8bit 트렌드를 나란히,
+PPL뿐 아니라 ROUGE-L 기준으로도 출력합니다. `scripts/run_experiment.py`에는
+`--num-rounds` 오버라이드를 추가했습니다 — 본 18조합을 다 돌리기 전에
+가장 어려운 조합(`qlora_4bit`, `α=0.1`)을 넉넉한 캡(예: 30)으로 먼저
+파일럿 실행해 실제 `converged_round`를 확인하고, 그 값 + 여유분을
+`experiment_config.yaml`의 `federated.num_rounds`에 반영하는 식으로
+상한을 역산하기 위함입니다:
+
+```bash
+python scripts/run_experiment.py --peft qlora --qlora-bits 4 --fl fedavg --alpha 0.1 --num-rounds 30
+```
+
+이 파일럿 run은 core 18조합 중 하나(`qlora_4bit`/`fedavg`/`α=0.1`)와
+run_name이 같아서, 자연 수렴했다면 재실행 없이 그대로 core 결과로
+재사용됩니다. 이 개발 환경은 GPU가 없어(`torch.cuda.is_available() ==
+False`) 파일럿 자체는 실제 GPU 인스턴스에서 실행해야 합니다.
+
+`compute_compression_alpha_trend` originally assumed a lower-is-better
+metric (PPL) when deciding the penalty's sign, so feeding ROUGE-L
+(higher-is-better) in directly flipped the "compression hurt performance"
+meaning. Three additions fix this:
+
+- Added `higher_is_better=False` (default, backward compatible) — a
+  higher-is-better metric like ROUGE-L can be passed in as-is with
+  `higher_is_better=True`, no sign conversion needed.
+- Added `compression="qlora_4bit"` (default) — calling the same function
+  again with `"qlora_8bit"` lets the two correlation coefficients be
+  compared to check "is 4-bit more sensitive to non-IID than 8-bit"
+  (a dose-response check).
+- Added `per_category_compression_penalty()` — breaks the same
+  correlation analysis down per task category, screening (via a z-score
+  on the relative penalty) which categories are especially vulnerable to
+  the compression x non-IID interaction (relative ranking, not a rigorous
+  significance test, since there are only 8 categories).
+
+`scripts/analyze_interaction.py` now prints the 4-bit/8-bit trends side by
+side, for both PPL and ROUGE-L. `scripts/run_experiment.py` gained a
+`--num-rounds` override — meant for piloting the hardest combination
+(`qlora_4bit`, `alpha=0.1`) with a generous cap (e.g. 30) before running
+the full 18 combinations, to read off its actual `converged_round` and set
+`experiment_config.yaml`'s `federated.num_rounds` to that value plus a
+margin:
+
+```bash
+python scripts/run_experiment.py --peft qlora --qlora-bits 4 --fl fedavg --alpha 0.1 --num-rounds 30
+```
+
+This pilot run shares its run_name with one of the core 18 combinations
+(`qlora_4bit`/`fedavg`/`alpha=0.1`), so if it converges naturally there's
+no need to rerun it — it's reused as-is for the core results. This dev
+environment has no GPU (`torch.cuda.is_available() == False`), so the
+pilot itself needs to run on an actual GPU instance.
+
 ### Subtask 2.3 분석은 코드가 아니라 실행 시점의 작업 (Subtask 2.3 Analysis Is a Runtime Task, Not Code)
 카테고리별 성능 분해(`per_category_breakdown`)는 추가 코드 없이,
 `results/logs/*_rounds.jsonl`에 이미 기록된 데이터에서 바로 계산됩니다 —
@@ -121,9 +192,9 @@ pip install -r requirements.txt
 pytest tests/ -v
 ```
 
-**테스트 결과**: **28 passed, 2 skipped**(QLoRA 4bit/8bit, GPU 필요) — 전체 스위트.
+**테스트 결과**: **34 passed, 2 skipped**(QLoRA 4bit/8bit, GPU 필요) — 전체 스위트.
 
-**Test results**: **28 passed, 2 skipped** (QLoRA 4-bit/8-bit, requires GPU) — full suite.
+**Test results**: **34 passed, 2 skipped** (QLoRA 4-bit/8-bit, requires GPU) — full suite.
 
 ---
 
