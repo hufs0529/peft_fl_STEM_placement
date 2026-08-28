@@ -211,11 +211,19 @@ all 8, since each client has different local data.)
 pytest tests/test_convergence.py tests/test_checkpointing.py tests/test_fl_integration.py -v
 ```
 
-**테스트 결과**: `pytest tests/ -m "not network"` 기준 22 passed, 2 skipped(QLoRA
-4bit/8bit, GPU 필요) — Week 1~3 테스트 전체 통과.
+**테스트 결과**: `pytest tests/ -m "not network"` 기준 45 passed, 2 skipped(QLoRA
+4bit/8bit, GPU 필요) — Week 1~3 테스트 전체 통과. `test_data.py`(라벨 마스킹 등
+`src/data.py` 유닛테스트), `test_metrics.py`(ROUGE-L/trainable params/VRAM
+계측), `test_scaffold.py`(control variate 집계 수식 검증)가 추가돼, 그동안
+어떤 테스트에서도 직접 호출되지 않던 함수들의 커버리지 공백을 메꿨습니다.
 
-**Test results**: 22 passed, 2 skipped (QLoRA 4-bit/8-bit, requires GPU),
+**Test results**: 45 passed, 2 skipped (QLoRA 4-bit/8-bit, requires GPU),
 based on `pytest tests/ -m "not network"` — all Week 1–3 tests pass.
+`test_data.py` (unit tests for `src/data.py`, incl. label masking),
+`test_metrics.py` (ROUGE-L/trainable params/VRAM measurement), and
+`test_scaffold.py` (verifying the control-variate aggregation formulas)
+were added, closing a coverage gap for functions that no test had ever
+called directly.
 
 ---
 
