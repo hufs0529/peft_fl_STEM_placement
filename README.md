@@ -192,9 +192,18 @@ pip install -r requirements.txt
 pytest tests/ -v
 ```
 
-**테스트 결과**: **34 passed, 2 skipped**(QLoRA 4bit/8bit, GPU 필요) — 전체 스위트.
+**테스트 결과**: **61 passed, 2 skipped**(QLoRA 4bit/8bit, GPU 필요) — 전체 스위트.
+`test_data.py`/`test_metrics.py`/`test_scaffold.py`가 추가돼(그동안 어떤
+테스트에서도 직접 호출되지 않던 `src/data.py`·`src/metrics.py`·
+`src/scaffold.py` 함수들의 커버리지 공백을 메꿈), `fl_runner.py`가 그동안
+버리고 있던 `peak_vram_gb`/`total_latency_sec` 로깅도 고쳤습니다.
 
-**Test results**: **34 passed, 2 skipped** (QLoRA 4-bit/8-bit, requires GPU) — full suite.
+**Test results**: **61 passed, 2 skipped** (QLoRA 4-bit/8-bit, requires GPU) — full suite.
+Added `test_data.py`/`test_metrics.py`/`test_scaffold.py` (closing a
+coverage gap for `src/data.py`/`src/metrics.py`/`src/scaffold.py`
+functions that no test had ever called directly), and fixed
+`fl_runner.py`, which was discarding `peak_vram_gb`/`total_latency_sec`
+instead of logging them.
 
 ---
 
