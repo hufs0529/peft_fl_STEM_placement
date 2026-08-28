@@ -73,10 +73,16 @@ up to 10 rounds, effective batch 16. `peft.qlora_bits` (4/8) and
 generation evaluation.
 
 ### 2. 압축률×non-IID 상관관계 계산 (`src/evaluate.py`) — **이 프로젝트의 핵심 산출물** (Compression×Non-IID Correlation — This Project's Key Deliverable)
-- `compute_compression_alpha_trend(run_results, performance_field)`: 각 (FL, α)
-  지점에서 "압축 페널티"(QLoRA-4bit 성능 − LoRA(무압축) 성능)를 구하고,
-  α가 작아질수록(non-IID가 강해질수록) 이 페널티가 커지는지를 Pearson
-  상관계수로 계산 — 지도교수 피드백에 대한 직접적인 정량적 답
+- `compute_compression_alpha_trend(run_results, performance_field, compression="qlora_4bit", higher_is_better=False)`:
+  각 (FL, α) 지점에서 "압축 페널티"(`compression` 인자로 고른 QLoRA-4bit
+  또는 8bit 성능 − LoRA(무압축) 성능)를 구하고, α가 작아질수록(non-IID가
+  강해질수록) 이 페널티가 커지는지를 Pearson 상관계수로 계산 — 지도교수
+  피드백에 대한 직접적인 정량적 답. `compression`을 바꿔가며 두 번
+  호출하면 4bit/8bit을 나란히 비교할 수 있고, ROUGE-L처럼 높을수록 좋은
+  지표는 `higher_is_better=True`로 부호 반전 없이 그대로 쓸 수 있다.
+- `per_category_compression_penalty`: 위 상관관계를 카테고리 단위로 쪼개
+  어떤 태스크 카테고리가 압축×non-IID 상호작용에 특히 취약한지 z-score로
+  스크리닝
 - `select_best_performing_combination`: Subtask 2.2 local_epochs=5 대상 선정
   (18조합 전체 대상으로 확장)
 - `per_category_breakdown` / `client_fairness_variance` / `total_communication_cost`:
@@ -85,12 +91,18 @@ generation evaluation.
   core 6조합·SCAFFOLD 대상 상호작용 계산)은 그대로 남아있지만 새 core
   설계에서는 호출하지 않음 — 필요 시 별도 진단으로 재사용 가능
 
-- `compute_compression_alpha_trend(run_results, performance_field)`: at each
-  (FL, alpha) point, computes the "compression penalty" (QLoRA-4bit minus
-  LoRA/uncompressed performance) and its Pearson correlation with alpha —
-  a positive correlation. Whether that penalty grows as alpha decreases
-  (non-IID intensifies) is the direct quantitative answer to the
-  advisor's question.
+- `compute_compression_alpha_trend(run_results, performance_field, compression="qlora_4bit", higher_is_better=False)`:
+  at each (FL, alpha) point, computes the "compression penalty"
+  (QLoRA-4bit or 8-bit, picked via `compression`, minus LoRA/uncompressed
+  performance) and its Pearson correlation with alpha. Whether that
+  penalty grows as alpha decreases (non-IID intensifies) is the direct
+  quantitative answer to the advisor's question. Calling it twice with
+  different `compression` values compares 4-bit and 8-bit side by side; a
+  higher-is-better metric like ROUGE-L can be passed in as-is with
+  `higher_is_better=True`.
+- `per_category_compression_penalty`: breaks the above correlation down
+  per task category, via a z-score, to screen which categories are
+  especially vulnerable to the compression x non-IID interaction
 - `select_best_performing_combination`: selects the target for Subtask 2.2
   local_epochs=5 (now scoped over all 18 combinations)
 - `per_category_breakdown` / `client_fairness_variance` / `total_communication_cost`:
@@ -110,6 +122,30 @@ for compression in lora "qlora --qlora-bits 8" "qlora --qlora-bits 4"; do
     done
   done
 done
+```
+
+18회를 다 돌리기 전에, `--num-rounds`로 캡을 넉넉하게 풀어서 가장 어려운
+조합(`qlora --qlora-bits 4 --alpha 0.1`)을 먼저 파일럿 실행해 실제
+`converged_round`를 확인하고, 그 값 + 여유분을 `experiment_config.yaml`의
+`federated.num_rounds`(현재 10)에 반영하는 것을 권장합니다 — 안 그러면
+가장 어려운 조합만 라운드 부족으로 잘려서, 압축×α 상관분석에서 "진짜
+압축이 나쁘다"와 "라운드가 모자랐다"가 구분되지 않습니다:
+
+```bash
+python scripts/run_experiment.py --peft qlora --qlora-bits 4 --fl fedavg --alpha 0.1 --num-rounds 30
+```
+
+Before running all 18, it's recommended to first pilot the hardest
+combination (`qlora --qlora-bits 4 --alpha 0.1`) with `--num-rounds` set
+to a generous cap, read off its actual `converged_round`, and set
+`experiment_config.yaml`'s `federated.num_rounds` (currently 10) to that
+value plus a margin — otherwise only the hardest combination gets
+truncated by the round cap, and the compression×alpha correlation
+analysis can't distinguish "compression is genuinely worse" from "it just
+ran out of rounds":
+
+```bash
+python scripts/run_experiment.py --peft qlora --qlora-bits 4 --fl fedavg --alpha 0.1 --num-rounds 30
 ```
 
 ### 4. 결과 분석 스크립트 (`scripts/analyze_interaction.py`) (Result Analysis Script)
