@@ -211,10 +211,17 @@ pytest tests/ -v   # Week 1~3 테스트 전부, evaluate.py 관련 테스트는 
 python -c "import scripts.run_experiment, scripts.analyze_interaction"  # import 검증
 ```
 
-**테스트 결과**: 18 passed, 2 skipped (QLoRA 4bit/8bit, GPU 필요 — `test_evaluate.py`는 Week 5에 추가)
+**테스트 결과**: 45 passed, 2 skipped (QLoRA 4bit/8bit, GPU 필요 — `test_evaluate.py`는 Week 5에 추가). 그동안 어떤 테스트에서도 직접 호출되지 않던 `src/data.py`(라벨 마스킹 등), `src/metrics.py`(ROUGE-L/VRAM 계측), `src/scaffold.py`(control variate 집계 수식) 커버리지를 `test_data.py`/`test_metrics.py`/`test_scaffold.py`로 메꿨고, `fl_runner.py`가 그동안 버리고 있던 `peak_vram_gb`/`total_latency_sec`를 `round_record`/최종 결과에 로깅하도록 고쳤습니다(`compute_compression_alpha_trend`의 메모리 축 분석에 필요).
 
-**Test results**: 18 passed, 2 skipped (QLoRA 4-bit/8-bit, requires GPU —
-`test_evaluate.py` will be added in Week 5)
+**Test results**: 45 passed, 2 skipped (QLoRA 4-bit/8-bit, requires GPU —
+`test_evaluate.py` will be added in Week 5). Closed a coverage gap for
+`src/data.py` (label masking, etc.), `src/metrics.py` (ROUGE-L/VRAM
+measurement), and `src/scaffold.py` (control-variate aggregation formulas)
+— none of which any test had called directly — via `test_data.py`/
+`test_metrics.py`/`test_scaffold.py`. Also fixed `fl_runner.py`, which was
+discarding `peak_vram_gb`/`total_latency_sec` instead of logging them into
+`round_record`/the final result (needed for the memory axis of
+`compute_compression_alpha_trend`).
 
 ---
 
