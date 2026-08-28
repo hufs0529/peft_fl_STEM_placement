@@ -10,6 +10,15 @@ Strategy 집계 로직을 직접 구현하는 수동 루프를 씁니다. 배선
   - FedAvg/FedProx는 weighted-average 집계, SCAFFOLD는 scaffold.py 경로
   - (선택) W&B 실시간 로깅
 
+압축률×non-IID 트레이드오프 분석(지도교수 피드백)을 위해, FedAvg/FedProx
+클라이언트의 fit()이 이미 계산하던 peak_vram_gb/latency_sec(src/metrics.py)를
+그동안 round_record에 집계하지 않고 버리고 있었다 — 이번에 round_record에
+peak_vram_gb(참여 클라이언트 평균)를, 최종 반환값에 avg_peak_vram_gb/
+total_latency_sec를 추가해 압축률×α 상관분석에 쓸 수 있게 했다. SCAFFOLD는
+scaffold_client_fit()이 이 계측을 하지 않아 peak_vram_gb가 None으로
+남는다 — core 분석(압축×non-IID)에서는 SCAFFOLD가 애초에 빠지므로
+의도적으로 계측을 추가하지 않았다.
+
 평가 설계: PPL은 매 라운드, 대표 클라이언트(clients[0]) 1개로만 계산한다.
 집계 직후 모든 클라이언트는 동일한 global 파라미터로 덮어써지고 동일한
 공용 held-out set을 보므로, 8명을 전부 평가해도 결과가 (부동소수점 오차
@@ -33,6 +42,16 @@ Strategy aggregation logic directly. What is wired in:
   - FedAvg/FedProx use weighted-average aggregation, SCAFFOLD uses the
     scaffold.py path
   - (Optional) real-time W&B logging
+
+For the compression-rate × non-IID trade-off analysis (advisor feedback):
+FedAvg/FedProx clients' fit() already computed peak_vram_gb/latency_sec
+(src/metrics.py), but round_record was discarding them instead of logging
+them. This adds peak_vram_gb (averaged over participating clients) to
+round_record, and avg_peak_vram_gb/total_latency_sec to the final return
+value, so they can be used in the compression × α correlation analysis.
+SCAFFOLD's scaffold_client_fit() does not perform this measurement, so its
+peak_vram_gb stays None — intentionally not instrumented, since SCAFFOLD is
+already excluded from the core (compression × non-IID) analysis.
 
 Evaluation design: PPL is computed every round, using only one representative
 client (clients[0]). Right after aggregation all clients are overwritten with
@@ -155,12 +174,21 @@ def run_federated_training(
             [v.numpy() for v in global_state.values()], {"run_generation_metrics": False}
         )
 
+        # FedAvg/FedProx의 fit_results에만 metrics(peak_vram_gb 포함)가 있음 —
+        # SCAFFOLD 경로는 scaffold_client_fit()이 이 계측을 하지 않아 빠짐.
+        # FedAvg/FedProx's fit_results carry metrics (incl. peak_vram_gb) —
+        # the SCAFFOLD path is absent since scaffold_client_fit() doesn't
+        # perform this measurement.
+        client_vram = [r["metrics"]["peak_vram_gb"] for r in fit_results if "metrics" in r]
+        peak_vram_gb = sum(client_vram) / len(client_vram) if client_vram else None
+
         round_record = {
             "round": round_num,
             "val_loss": val_loss,
             "val_perplexity": float(torch.exp(torch.tensor(val_loss))),
             "round_latency_sec": time.perf_counter() - round_start,
             "communication_bytes_this_round": payload_bytes_per_round * len(selected_idx),
+            "peak_vram_gb": peak_vram_gb,
         }
         round_records.append(round_record)
         with open(round_log_path, "a") as f:
@@ -220,6 +248,9 @@ def run_federated_training(
                     }) + "\n")
 
     total_comm_bytes = sum(r["communication_bytes_this_round"] for r in round_records)
+    total_latency_sec = sum(r["round_latency_sec"] for r in round_records)
+    vram_values = [r["peak_vram_gb"] for r in round_records if r["peak_vram_gb"] is not None]
+    avg_peak_vram_gb = sum(vram_values) / len(vram_values) if vram_values else None
     if wb is not None:
         import wandb
         wandb.finish()
@@ -232,5 +263,7 @@ def run_federated_training(
         "val_perplexity": round_records[-1]["val_perplexity"],
         "rouge_l": round_records[-1].get("rouge_l"),
         "total_communication_bytes": total_comm_bytes,
+        "total_latency_sec": total_latency_sec,
+        "avg_peak_vram_gb": avg_peak_vram_gb,
         "round_records": round_records,
     }
