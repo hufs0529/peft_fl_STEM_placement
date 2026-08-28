@@ -1,12 +1,14 @@
 """Dirichlet(alpha) non-IID 파티셔닝 + 카테고리 최소 임계값 리샘플링.
 
 Subtask 1.1: 8클라이언트, Dolly-15k를 native task category 기준
-Dirichlet(alpha=0.5)로 비IID 분배 (고정값, 스윕 없음).
+Dirichlet(alpha=1)로 비IID 분배 (고정값, 스윕 없음). 지도교수 피드백:
+스윕 설계에서는 alpha in {0.1, 1, 10} 세 값을 사용.
 
 Dirichlet(alpha) non-IID partitioning + minimum-category-threshold resampling.
 
 Subtask 1.1: distribute Dolly-15k non-IID across 8 clients, keyed on the
-native task category, using Dirichlet(alpha=0.5) (a fixed value, no sweep).
+native task category, using Dirichlet(alpha=1) (a fixed value, no sweep).
+Advisor feedback: the sweep design uses alpha in {0.1, 1, 10}.
 """
 
 from collections import defaultdict
@@ -24,7 +26,7 @@ def partition_by_category(
 ) -> Dict[int, List[dict]]:
     """category 필드를 기준으로 Dirichlet(alpha)로 클라이언트별 비IID 분배.
 
-    alpha가 작을수록(예: 0.1) 강한 비IID, 클수록(예: 1.0) near-IID.
+    alpha가 작을수록(예: 0.1) 강한 비IID, 클수록(예: 10) near-IID.
     min_category_threshold 미만인 카테고리는 리샘플링(업샘플링)하여
     각 클라이언트가 최소한의 샘플을 확보하도록 함 (계획서 §5.2, §6 리스크 대응).
 
@@ -32,7 +34,7 @@ def partition_by_category(
     the category field.
 
     A smaller alpha (e.g. 0.1) yields stronger non-IID; a larger one
-    (e.g. 1.0) yields near-IID. Categories below min_category_threshold are
+    (e.g. 10) yields near-IID. Categories below min_category_threshold are
     resampled (upsampled) so every client can secure a minimum number of
     samples (plan §5.2, §6 risk mitigation).
     """
@@ -77,13 +79,13 @@ def summarize_partition(client_data: Dict[int, List[dict]]) -> Dict[int, Dict[st
 def heterogeneity_score(client_data: Dict[int, List[dict]]) -> float:
     """파티션이 실제로 얼마나 비IID한지 정량화 (0=완전 균등, 1=완전 편중).
     각 클라이언트의 최다 카테고리 비율의 평균으로 근사.
-    Dirichlet(alpha=0.5) 파티셔닝이 실제로 non-IID를 만들어내는지
+    Dirichlet(alpha=1) 파티셔닝이 실제로 non-IID를 만들어내는지
     검증하는 용도(Week 2 파이프라인 검증).
 
     Quantify how non-IID a partition actually is (0=perfectly even,
     1=perfectly skewed). Approximated as the average, across clients, of
     each client's dominant-category share. Used to verify that
-    Dirichlet(alpha=0.5) partitioning actually produces non-IID data
+    Dirichlet(alpha=1) partitioning actually produces non-IID data
     (Week 2 pipeline verification).
     """
     ratios = []

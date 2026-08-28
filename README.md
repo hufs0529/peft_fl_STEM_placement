@@ -27,7 +27,7 @@ Quantisation Noise in Federated LLM Fine-Tuning?"* directly in code.
 > 정교함 × 압축 강도"를 검증할 계획이었습니다. Week 5에 지도교수로부터
 > "연구의 중점을 압축률과 non-IID 강도의 상관관계로 두는 게 좋겠다"는
 > 피드백을 받아, SCAFFOLD를 core에서 빼고(코드/테스트는 유지) 압축
-> 강도를 3단계(무압축/8bit/4bit)로, Dirichlet α를 3단계(0.1/0.5/1.0)로
+> 강도를 3단계(무압축/8bit/4bit)로, Dirichlet α를 3단계(0.1/1/10)로
 > 넓힌 **3×2×3=18조합** 설계로 개정했습니다. 원래 연구질문·6조합 설계는
 > `week4` 브랜치 이전 시점의 히스토리로 남아있습니다.
 >
@@ -39,7 +39,7 @@ Quantisation Noise in Federated LLM Fine-Tuning?"* directly in code.
 > correlation between compression rate and non-IID intensity," so the
 > design was revised to drop SCAFFOLD from the core (its code/tests are
 > kept) and widen compression to 3 levels (uncompressed/8-bit/4-bit) and
-> Dirichlet alpha to 3 levels (0.1/0.5/1.0) — a **3×2×3 = 18-combination**
+> Dirichlet alpha to 3 levels (0.1/1/10) — a **3×2×3 = 18-combination**
 > design. The original research question and 6-combination design remain
 > in the history prior to the `week4` branch.
 
@@ -72,7 +72,7 @@ dolly15k-fl-peft-v2/
 ├── src/                          # dev/experiment 공용 핵심 로직
 │   ├── models.py                   # LoRA/QLoRA(4bit·8bit, core), DoRA(미사용 진단 대조군) 래핑
 │   ├── data.py                     # Dolly-15k 로딩, 토크나이징, held-out 스플릿
-│   ├── partitioning.py             # Dirichlet(alpha=0.5) 비IID + 카테고리 리샘플링
+│   ├── partitioning.py             # Dirichlet(alpha=1) 비IID + 카테고리 리샘플링
 │   ├── communication.py            # FL 파라미터 왕복 + payload 크기 계산
 │   ├── fl_client.py                # 공통 클라이언트 (FedProx proximal term, warmup, VRAM/latency, ROUGE-L)
 │   ├── fl_runner.py                # 수동 라운드 루프 — 수렴기준/체크포인트/로깅/W&B 전부 배선
@@ -103,7 +103,7 @@ dolly15k-fl-peft-v2/
 ├── src/                          # core logic shared by dev/experiment
 │   ├── models.py                   # wraps LoRA/QLoRA (4-bit/8-bit, core) and DoRA (unused diagnostic control)
 │   ├── data.py                     # Dolly-15k loading, tokenisation, held-out split
-│   ├── partitioning.py             # Dirichlet (alpha=0.5) non-IID + category resampling
+│   ├── partitioning.py             # Dirichlet (alpha=1) non-IID + category resampling
 │   ├── communication.py            # FL parameter round-trip + payload size computation
 │   ├── fl_client.py                # shared client (FedProx proximal term, warmup, VRAM/latency, ROUGE-L)
 │   ├── fl_runner.py                # manual round loop — wires up convergence, checkpointing, logging, W&B
@@ -140,7 +140,7 @@ with three axes of arguments: `--peft` (+ `--qlora-bits`), `--fl`, and
 ```bash
 for compression in lora "qlora --qlora-bits 8" "qlora --qlora-bits 4"; do
   for fl in fedavg fedprox; do
-    for alpha in 0.1 0.5 1.0; do
+    for alpha in 0.1 1 10; do
       python scripts/run_experiment.py --peft $compression --fl $fl --alpha $alpha
     done
   done
@@ -375,7 +375,7 @@ to pass.
 | 주차 | 실행 명령 | 검증 대상 |
 |---|---|---|
 | Week 1 | `pytest tests/test_model_wiring.py` → `python scripts/run_dev_pilot.py --stage single_client` | 모델+GPU 환경 확인, PEFT 배선(LoRA/QLoRA/DoRA), 단일 클라이언트 loss 감소 |
-| Week 2 | `pytest tests/test_roundtrip.py tests/test_partitioning.py` | Dolly-15k 파이프라인, 파라미터 왕복, Dirichlet(α=0.5) 파티셔닝 검증 |
+| Week 2 | `pytest tests/test_roundtrip.py tests/test_partitioning.py` | Dolly-15k 파이프라인, 파라미터 왕복, Dirichlet(α=1) 파티셔닝 검증 |
 | Week 3 | `pytest tests/test_fl_integration.py tests/test_convergence.py tests/test_checkpointing.py` | FedProx/SCAFFOLD 통합, 체크포인트/수렴 기준, 축소 규모 6조합 예행연습 |
 | Week 4 | `run_experiment.py` × 18(core) → `analyze_interaction.py` → local-epoch 강건성 점검 | Subtask 1.2 본 실험(개정 설계) + Subtask 2.2 진단 |
 | Week 5 | `pytest tests/test_evaluate.py` → 분석 노트북에서 `src/evaluate.py` 함수 직접 호출 | Subtask 1.3 압축률×non-IID 상관관계 분석, Subtask 2.3 카테고리별 진단 |
@@ -384,7 +384,7 @@ to pass.
 | Week | Command run | What it verifies |
 |---|---|---|
 | Week 1 | `pytest tests/test_model_wiring.py` → `python scripts/run_dev_pilot.py --stage single_client` | model+GPU environment check, PEFT wiring (LoRA/QLoRA/DoRA), single-client loss decrease |
-| Week 2 | `pytest tests/test_roundtrip.py tests/test_partitioning.py` | Dolly-15k pipeline, parameter round-trip, Dirichlet (α=0.5) partitioning verification |
+| Week 2 | `pytest tests/test_roundtrip.py tests/test_partitioning.py` | Dolly-15k pipeline, parameter round-trip, Dirichlet (α=1) partitioning verification |
 | Week 3 | `pytest tests/test_fl_integration.py tests/test_convergence.py tests/test_checkpointing.py` | FedProx/SCAFFOLD integration, checkpointing/convergence criterion, small-scale rehearsal of the 6 combinations |
 | Week 4 | `run_experiment.py` × 18 (core) → `analyze_interaction.py` → local-epoch robustness check | Subtask 1.2 main experiment (revised design) + Subtask 2.2 diagnostic |
 | Week 5 | `pytest tests/test_evaluate.py` → calling `src/evaluate.py` functions directly from an analysis notebook | Subtask 1.3 compression×non-IID correlation analysis, Subtask 2.3 per-category diagnostics |
@@ -475,7 +475,7 @@ pip install -r requirements.txt
   계산합니다 — 자기회귀 생성 비용이 커서(1,501개 전체를 매 라운드 생성하면
   수십 GPU시간) 통계적으로 안정적인 수준에서 샘플링합니다.
 - 압축률×α 상관관계(`compute_compression_alpha_trend`)는 α **3개 지점
-  (0.1/0.5/1.0)**만으로 계산한 Pearson 상관계수입니다 — 지점이 적어
+  (0.1/1/10)**만으로 계산한 Pearson 상관계수입니다 — 지점이 적어
   비선형적인 패턴(예: 중간 α에서 페널티가 가장 큰 U자형)은 놓칠 수
   있습니다.
 - 코드 전체는 **문법 검증만 마쳤고 실제 GPU 환경에서 아직 실행되지 않았습니다.**
@@ -505,7 +505,7 @@ pip install -r requirements.txt
   would take dozens of GPU-hours), sampling is used at a statistically
   stable level instead.
 - The compression×alpha correlation (`compute_compression_alpha_trend`) is
-  a Pearson correlation computed from only **3 alpha points (0.1/0.5/1.0)**
+  a Pearson correlation computed from only **3 alpha points (0.1/1/10)**
   — with so few points, a non-linear pattern (e.g., a U-shape where the
   penalty peaks at a middle alpha) could be missed.
 - The entire codebase has **only passed syntax verification and has not

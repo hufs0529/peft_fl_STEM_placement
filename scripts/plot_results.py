@@ -91,14 +91,14 @@ def make_sample_results() -> List[dict]:
     A synthetic pattern where the compression penalty grows as non-IID
     intensifies (alpha shrinks)."""
     rng = random.Random(7)
-    base_ppl = {0.1: 12.0, 0.5: 9.0, 1.0: 7.5}
+    base_ppl = {0.1: 12.0, 1: 9.0, 10: 7.5}
     penalty_scale = {"lora": 0.0, "qlora_8bit": 0.4, "qlora_4bit": 1.0}
     results = []
     for compression in COMPRESSIONS:
         for fl in FLS:
             fl_offset = 0.0 if fl == "fedprox" else 0.6
             for alpha in ALPHAS:
-                non_iid_amplifier = {0.1: 3.0, 0.5: 1.3, 1.0: 0.6}[alpha]
+                non_iid_amplifier = {0.1: 3.0, 1: 1.3, 10: 0.6}[alpha]
                 ppl = base_ppl[alpha] + fl_offset + penalty_scale[compression] * non_iid_amplifier
                 ppl += rng.uniform(-0.15, 0.15)
                 rounds = max(3, round(6 + non_iid_amplifier + penalty_scale[compression] * 1.5 + {"lora": 0, "qlora_8bit": 0.4, "qlora_4bit": 0.8}[compression] + rng.uniform(-0.4, 0.4)))
@@ -149,7 +149,7 @@ def plot_trend(results: List[dict], field: str, ylabel: str, title: str, filenam
         ax.set_title(fl.upper(), fontsize=11, color=INK, loc="left")
         ax.set_xlabel("Dirichlet α (non-IID intensity →)", fontsize=9.5, color=MUTED)
         ax.set_xticks(ALPHAS)
-        ax.invert_xaxis()  # 왼쪽(near-IID, alpha=1.0) -> 오른쪽(강한 non-IID, alpha=0.1)
+        ax.invert_xaxis()  # 왼쪽(near-IID, alpha=10) -> 오른쪽(강한 non-IID, alpha=0.1)
         ax.margins(x=0.18)
     axes[0].set_ylabel(ylabel, fontsize=9.5, color=MUTED)
     fig.suptitle(title, fontsize=13, color=INK, x=0.02, ha="left", fontweight="bold")

@@ -1,7 +1,7 @@
 """Week 5 분석 (지도교수 피드백 반영: 압축률 x Dirichlet 스윕, Subtask 1.3/2.1/2.2 선정)
 — 18조합(3압축 x 2FL x 3alpha) 완료 후 실행.
 
-3압축(lora/qlora_8bit/qlora_4bit) x 2FL(fedavg/fedprox) x 3alpha(0.1/0.5/1.0)
+3압축(lora/qlora_8bit/qlora_4bit) x 2FL(fedavg/fedprox) x 3alpha(0.1/1/10)
 = 18개 실행 로그를 모두 읽어:
   1) 압축률 x Dirichlet alpha 격자표 출력
   2) 압축 페널티(4bit - 무압축)가 alpha가 작아질수록(non-IID가 강해질수록)
@@ -25,7 +25,7 @@ combinations (3 compression x 2 FL x 3 alpha) are complete.
 
 Reads the logs of all 18 runs formed by 3 compression levels
 (lora/qlora_8bit/qlora_4bit) x 2 FL algorithms (fedavg/fedprox) x 3 alpha
-values (0.1/0.5/1.0) to:
+values (0.1/1/10) to:
   1) print a compression x Dirichlet-alpha grid,
   2) check via a Pearson correlation coefficient whether the compression
      penalty (4-bit minus uncompressed) grows as alpha decreases (non-IID
@@ -54,7 +54,7 @@ from src.evaluate import compute_compression_alpha_trend, select_best_performing
 
 COMPRESSIONS = ["lora", "qlora_8bit", "qlora_4bit"]
 FLS = ["fedavg", "fedprox"]
-ALPHAS = [0.1, 0.5, 1.0]
+ALPHAS = [0.1, 1, 10]
 
 
 def build_run_name(compression: str, fl: str, alpha: float) -> str:
@@ -63,7 +63,7 @@ def build_run_name(compression: str, fl: str, alpha: float) -> str:
     Exactly mirrors build_run_name() in scripts/run_experiment.py."""
     peft = "lora" if compression == "lora" else "qlora"
     name = f"{peft}_{fl}_ep1"
-    if alpha != 0.5:
+    if alpha != 1:
         name += f"_a{alpha}"
     if compression == "qlora_8bit":
         name += "_q8bit"
