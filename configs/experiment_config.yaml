@@ -2,7 +2,7 @@
 # 피드백으로 설계 개정)
 #
 # 개정된 core design: 압축률(LoRA=무압축/QLoRA 8bit/QLoRA 4bit) x
-#              FL(FedAvg/FedProx) x Dirichlet alpha(0.1/0.5/1.0)
+#              FL(FedAvg/FedProx) x Dirichlet alpha(0.1/1/10)
 #              = 18 combinations, 8 clients, 최대 10라운드,
 #              3라운드/<1%개선 수렴 기준. 지도교수 피드백: 이 연구의
 #              중점을 "압축률과 non-IID 강도의 상관관계"로 재설정 —
@@ -17,7 +17,7 @@
 #
 # Revised core design: compression (LoRA=uncompressed / QLoRA 8-bit /
 #              QLoRA 4-bit) x FL (FedAvg/FedProx) x Dirichlet alpha
-#              (0.1/0.5/1.0) = 18 combinations, 8 clients, up to 10
+#              (0.1/1/10) = 18 combinations, 8 clients, up to 10
 #              rounds, convergence criterion of 3 rounds / <1%
 #              improvement. Advisor feedback reframed this project's
 #              focus as "the correlation between compression rate and
@@ -60,13 +60,13 @@ federated:
 # --- core (지도교수 피드백 반영 개정): 아래 18개 조합을 실행 ---
 #   compression x fl x alpha, 예: --peft lora --fl fedavg --alpha 0.1
 #   (lora | qlora --qlora-bits 8 | qlora --qlora-bits 4)
-#     x (fedavg | fedprox) x (--alpha 0.1 | 0.5 | 1.0)
+#     x (fedavg | fedprox) x (--alpha 0.1 | 1 | 10)
 #   scripts/analyze_interaction.py가 18개 로그를 모아 압축률 x alpha
 #   상관관계를 계산.
 # --- core (revised per advisor feedback): run the 18 combinations below ---
 #   compression x fl x alpha, e.g. --peft lora --fl fedavg --alpha 0.1
 #   (lora | qlora --qlora-bits 8 | qlora --qlora-bits 4)
-#     x (fedavg | fedprox) x (--alpha 0.1 | 0.5 | 1.0)
+#     x (fedavg | fedprox) x (--alpha 0.1 | 1 | 10)
 #   scripts/analyze_interaction.py aggregates the 18 logs to compute the
 #   compression x alpha correlation.
 peft:
@@ -87,14 +87,14 @@ fl_algorithm:
   proximal_mu: 0.01               # fedprox/scaffold 관련 하이퍼파라미터
 
 partitioning:
-  # alpha: 기본값(0.5)일 뿐, 18조합 설계에서는 scripts/run_experiment.py의
-  # --alpha 인자로 {0.1, 0.5, 1.0} 세 값 전부를 실제로 스윕함(지도교수 피드백
+  # alpha: 기본값(1)일 뿐, 18조합 설계에서는 scripts/run_experiment.py의
+  # --alpha 인자로 {0.1, 1, 10} 세 값 전부를 실제로 스윕함(지도교수 피드백
   # — 압축률x non-IID 상관관계가 이 실험의 핵심 축).
-  # alpha: just the default (0.5) here — in the 18-combination design, all
-  # three values {0.1, 0.5, 1.0} are actually swept via --alpha in
+  # alpha: just the default (1) here — in the 18-combination design, all
+  # three values {0.1, 1, 10} are actually swept via --alpha in
   # scripts/run_experiment.py (advisor feedback — the compression x
   # non-IID correlation is the core axis of this experiment).
-  alpha: 0.5
+  alpha: 1
   min_category_threshold: 150
 
 training:

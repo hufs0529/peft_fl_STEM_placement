@@ -16,7 +16,7 @@
   점검에 쓸 "core 6조합 중 성능이 가장 좋은 조합"을 고른다.
 - compute_compression_alpha_trend: 지도교수 피드백(압축률 x Dirichlet
   강건성 스윕) — 3압축(lora/qlora_8bit/qlora_4bit) x 2FL(fedavg/fedprox)
-  x 3alpha(0.1/0.5/1.0) 18조합에서, non-IID가 강해질수록(alpha가
+  x 3alpha(0.1/1/10) 18조합에서, non-IID가 강해질수록(alpha가
   작을수록) 압축 페널티가 커지는지를 Pearson 상관계수로 정량화한다.
 
 Analysis functions computed from data that is already logged, at no extra
@@ -44,7 +44,7 @@ GPU cost.
 - compute_compression_alpha_trend: advisor feedback (compression-rate x
   Dirichlet robustness sweep) — over the 18 combinations formed by 3
   compression levels (lora/qlora_8bit/qlora_4bit) x 2 FL algorithms
-  (fedavg/fedprox) x 3 alpha values (0.1/0.5/1.0), quantifies via a
+  (fedavg/fedprox) x 3 alpha values (0.1/1/10), quantifies via a
   Pearson correlation coefficient whether the compression penalty grows
   as non-IID intensity increases (alpha decreases).
 """

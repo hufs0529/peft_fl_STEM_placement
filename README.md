@@ -17,7 +17,7 @@ persist even as PEFT quantization (LoRA→QLoRA) intensifies?
 | 주차 | 목표 | 상태 |
 |---|---|---|
 | Week 1 | 모델+GPU 환경 확인, PEFT 배선(LoRA/QLoRA/DoRA) | ✅ 완료 |
-| Week 2 | Dolly-15k 파이프라인, Dirichlet(α=0.5) 파티셔닝 | ✅ 완료 |
+| Week 2 | Dolly-15k 파이프라인, Dirichlet(α=1) 파티셔닝 | ✅ 완료 |
 | Week 3 | FedProx/SCAFFOLD 통합, 체크포인트/수렴 기준 | ✅ 완료 |
 | **Week 4** | Core 18조합(3압축×2FL×3α) 실행 스크립트 + 압축률×non-IID 상관관계 분석 | ✅ 완료 (이 브랜치) |
 | Week 5 | 상관관계 분석 테스트 + 카테고리별 진단 | 예정 (`week5`) |
@@ -26,7 +26,7 @@ persist even as PEFT quantization (LoRA→QLoRA) intensifies?
 | Week | Goal | Status |
 |---|---|---|
 | Week 1 | Verify model+GPU environment, PEFT wiring (LoRA/QLoRA/DoRA) | ✅ Done |
-| Week 2 | Dolly-15k pipeline, Dirichlet(α=0.5) partitioning | ✅ Done |
+| Week 2 | Dolly-15k pipeline, Dirichlet(α=1) partitioning | ✅ Done |
 | Week 3 | FedProx/SCAFFOLD integration, checkpoint/convergence criteria | ✅ Done |
 | **Week 4** | Core 18-combination (3 compression × 2 FL × 3 alpha) run script + compression×non-IID correlation analysis | ✅ Done (this branch) |
 | Week 5 | Correlation analysis tests + per-category diagnostics | Planned (`week5`) |
@@ -36,12 +36,12 @@ persist even as PEFT quantization (LoRA→QLoRA) intensifies?
 
 ## Week 1~3 요약 (Week 1-3 Summary)
 - **Week 1**: PEFT 배선(LoRA/QLoRA/DoRA), 파라미터 헬퍼, wiring 테스트
-- **Week 2**: Dolly-15k 파이프라인, Dirichlet(α=0.5) 파티셔닝
+- **Week 2**: Dolly-15k 파이프라인, Dirichlet(α=1) 파티셔닝
 - **Week 3**: FedProx/SCAFFOLD, 체크포인트, 수렴 기준, 수동 FL 라운드 루프,
   FL 통합 테스트(18 passed)
 
 - **Week 1**: PEFT wiring (LoRA/QLoRA/DoRA), parameter helpers, wiring tests
-- **Week 2**: Dolly-15k pipeline, Dirichlet(α=0.5) partitioning
+- **Week 2**: Dolly-15k pipeline, Dirichlet(α=1) partitioning
 - **Week 3**: FedProx/SCAFFOLD, checkpointing, convergence criteria, manual FL round loop,
   FL integration tests (18 passed)
 
@@ -105,7 +105,7 @@ generation evaluation.
 # Core, 18회 (3압축 x 2FL x 3alpha)
 for compression in lora "qlora --qlora-bits 8" "qlora --qlora-bits 4"; do
   for fl in fedavg fedprox; do
-    for alpha in 0.1 0.5 1.0; do
+    for alpha in 0.1 1 10; do
       python scripts/run_experiment.py --peft $compression --fl $fl --alpha $alpha
     done
   done
@@ -136,7 +136,7 @@ local_epochs=5) 총 8회 실행을 계획했으나, Week 5에 지도교수로부
 
 - **압축률 3단계** (LoRA=무압축 / QLoRA 8bit / QLoRA 4bit) × **FL 2종**
   (FedAvg/FedProx, SCAFFOLD는 core에서 제외 — 코드/테스트는 유지) ×
-  **Dirichlet α 3단계** (0.1/0.5/1.0) = **18회 실행**
+  **Dirichlet α 3단계** (0.1/1/10) = **18회 실행**
 - 모델을 Qwen2.5-3B → **Qwen2.5-1.5B-Instruct**로 축소(지도교수 승인) —
   Qwen 계열 유지, GPU 비용 절감
 - `fl_client.py`/`fl_runner.py`(Week 3)에서 이미 PPL은 대표 클라이언트
@@ -154,7 +154,7 @@ non-IID intensity," so the core design was revised as follows:
 - **3 compression levels** (LoRA=uncompressed / QLoRA 8-bit / QLoRA
   4-bit) × **2 FL algorithms** (FedAvg/FedProx — SCAFFOLD is dropped from
   the core design, though its code/tests are kept) × **3 Dirichlet alpha
-  levels** (0.1/0.5/1.0) = **18 runs**
+  levels** (0.1/1/10) = **18 runs**
 - The model was downsized from Qwen2.5-3B to **Qwen2.5-1.5B-Instruct**
   (advisor-approved) — staying within the Qwen family while cutting GPU
   cost
