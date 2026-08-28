@@ -49,9 +49,9 @@ fl_algorithm:
   proximal_mu: 0.01
 
 partitioning:
-  # 고정값 (연구계획서 Subtask 1.1)
-  # Fixed value (research proposal Subtask 1.1)
-  alpha: 0.5                    # 고정값 (연구계획서 Subtask 1.1)
+  # 고정값 (연구계획서 Subtask 1.1) — 지도교수 피드백: sweep은 0.1/1/10
+  # Fixed value (research proposal Subtask 1.1) — advisor feedback: sweep is 0.1/1/10
+  alpha: 1                      # 고정값 (연구계획서 Subtask 1.1)
   min_category_threshold: 150
 
 training:

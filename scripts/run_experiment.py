@@ -6,7 +6,7 @@ Core design (개정): 압축률(3) x FL(2) x Dirichlet alpha(3) = 18회 실행.
 
     for compression in lora "qlora --qlora-bits 8" "qlora --qlora-bits 4"; do
       for fl in fedavg fedprox; do
-        for alpha in 0.1 0.5 1.0; do
+        for alpha in 0.1 1 10; do
           python scripts/run_experiment.py --peft $compression --fl $fl --alpha $alpha
         done
       done
@@ -31,7 +31,7 @@ is dropped from the core design (its code/tests are kept).
 
     for compression in lora "qlora --qlora-bits 8" "qlora --qlora-bits 4"; do
       for fl in fedavg fedprox; do
-        for alpha in 0.1 0.5 1.0; do
+        for alpha in 0.1 1 10; do
           python scripts/run_experiment.py --peft $compression --fl $fl --alpha $alpha
         done
       done
@@ -80,12 +80,12 @@ def load_config(path: str, overrides: dict) -> dict:
 
 
 def build_run_name(config: dict) -> str:
-    # alpha/qlora_bits가 core 기본값(0.5, 4bit)과 같으면 기존 run_name 형식을
+    # alpha/qlora_bits가 core 기본값(1, 4bit)과 같으면 기존 run_name 형식을
     # 그대로 유지 — analyze_interaction.py의 core 6조합 파일명 매칭과의
     # 하위 호환성을 위함. 기본값과 다를 때만(강건성 스윕) 접미사를 붙여
     # core 결과를 덮어쓰지 않도록 함.
     #
-    # If alpha/qlora_bits equal the core defaults (0.5, 4-bit), the run_name
+    # If alpha/qlora_bits equal the core defaults (1, 4-bit), the run_name
     # format is left unchanged — this keeps backward compatibility with
     # analyze_interaction.py's filename matching for the core 6
     # combinations. A suffix is appended only when they differ from the
@@ -96,7 +96,7 @@ def build_run_name(config: dict) -> str:
         f"_ep{config['federated']['local_epochs']}"
     )
     alpha = config["partitioning"]["alpha"]
-    if alpha != 0.5:
+    if alpha != 1:
         name += f"_a{alpha}"
     if config["peft"]["type"] == "qlora":
         qlora_bits = config["peft"].get("qlora_bits", 4)
@@ -113,9 +113,9 @@ def main():
     parser.add_argument("--local-epochs", type=int, default=None, help="Subtask 2.2 강건성 점검: 1(기본) vs 5")
     parser.add_argument(
         "--alpha", type=float, default=None,
-        help="지도교수 피드백: Dirichlet 비IID 강도. Core 18조합 설계는 0.1/0.5/1.0 "
+        help="지도교수 피드백: Dirichlet 비IID 강도. Core 18조합 설계는 0.1/1/10 "
              "전부를 사용 / advisor feedback: Dirichlet non-IID intensity. The core "
-             "18-combination design uses all of 0.1/0.5/1.0",
+             "18-combination design uses all of 0.1/1/10",
     )
     parser.add_argument(
         "--qlora-bits", type=int, default=None, choices=[4, 8],

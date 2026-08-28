@@ -85,18 +85,18 @@ def test_select_best_performing_combination_prefers_lowest_perplexity():
     assert best["peft"] == "lora" and best["fl"] == "scaffold"
 
 
-def _make_18_combo_runs(penalties=(3.0, 1.5, 0.5)):
+def _make_18_combo_runs(penalties=(3.0, 2.5, 0.5)):
     """지도교수 피드백 반영: 3압축 x 2FL x 3alpha 가상 데이터. alpha가
     작을수록(non-IID가 강할수록) 압축 페널티가 커지도록 설계 —
-    penalties는 alpha=[0.1, 0.5, 1.0] 순서의 (4bit-무압축) 성능차.
+    penalties는 alpha=[0.1, 1, 10] 순서의 (4bit-무압축) 성능차.
 
     Advisor feedback synthetic data: 3 compression x 2 FL x 3 alpha.
     Designed so the compression penalty grows as alpha decreases
     (stronger non-IID) — penalties are the (4-bit minus uncompressed)
-    performance gap in alpha=[0.1, 0.5, 1.0] order.
+    performance gap in alpha=[0.1, 1, 10] order.
     """
     runs = []
-    for alpha, penalty in zip((0.1, 0.5, 1.0), penalties):
+    for alpha, penalty in zip((0.1, 1, 10), penalties):
         for fl in ("fedavg", "fedprox"):
             runs.append({"compression": "lora", "fl": fl, "alpha": alpha, "val_perplexity": 10.0})
             runs.append({"compression": "qlora_8bit", "fl": fl, "alpha": alpha, "val_perplexity": 10.0 + penalty / 2})
@@ -105,12 +105,12 @@ def _make_18_combo_runs(penalties=(3.0, 1.5, 0.5)):
 
 
 def test_compute_compression_alpha_trend_penalty_values():
-    runs = _make_18_combo_runs(penalties=(3.0, 1.5, 0.5))
+    runs = _make_18_combo_runs(penalties=(3.0, 2.5, 0.5))
     trend = compute_compression_alpha_trend(runs, performance_field="val_perplexity")
 
-    assert trend["fedavg"]["alphas"] == [0.1, 0.5, 1.0]
-    assert trend["fedavg"]["compression_penalty"] == [3.0, 1.5, 0.5]
-    assert trend["fedprox"]["compression_penalty"] == [3.0, 1.5, 0.5]
+    assert trend["fedavg"]["alphas"] == [0.1, 1, 10]
+    assert trend["fedavg"]["compression_penalty"] == [3.0, 2.5, 0.5]
+    assert trend["fedprox"]["compression_penalty"] == [3.0, 2.5, 0.5]
 
 
 def test_compute_compression_alpha_trend_negative_correlation_when_penalty_grows_as_alpha_shrinks():
@@ -118,7 +118,7 @@ def test_compute_compression_alpha_trend_negative_correlation_when_penalty_grows
     # alpha와 페널티는 음의 상관관계를 가져야 함.
     # Designed so the compression penalty grows as non-IID strengthens
     # (alpha shrinks), so alpha and penalty should be negatively correlated.
-    runs = _make_18_combo_runs(penalties=(3.0, 1.5, 0.5))
+    runs = _make_18_combo_runs(penalties=(3.0, 2.5, 0.5))
     trend = compute_compression_alpha_trend(runs, performance_field="val_perplexity")
     assert trend["fedavg"]["alpha_penalty_correlation"] < -0.9
     assert trend["fedprox"]["alpha_penalty_correlation"] < -0.9

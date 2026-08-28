@@ -22,7 +22,7 @@ persist as PEFT quantization (LoRA→QLoRA) becomes more aggressive?
 | 주차 | 목표 | 상태 |
 |---|---|---|
 | Week 1 | 모델+GPU 환경 확인, PEFT 배선 | ✅ 완료 |
-| Week 2 | Dolly-15k 파이프라인, Dirichlet(α=0.5) 파티셔닝 | ✅ 완료 |
+| Week 2 | Dolly-15k 파이프라인, Dirichlet(α=1) 파티셔닝 | ✅ 완료 |
 | Week 3 | FedProx/SCAFFOLD 통합, 체크포인트/수렴 기준 | ✅ 완료 |
 | Week 4 | Core 18조합(3압축×2FL×3α) 실행 스크립트 + 압축률×non-IID 상관관계 분석 함수 | ✅ 완료 |
 | **Week 5** | 지도교수 피드백 반영 설계 개정 + 상관관계/선정 로직 테스트 완료 | ✅ 완료 (이 브랜치) |
@@ -31,7 +31,7 @@ persist as PEFT quantization (LoRA→QLoRA) becomes more aggressive?
 | Week | Goal | Status |
 |---|---|---|
 | Week 1 | Verify model+GPU environment, PEFT wiring | ✅ Done |
-| Week 2 | Dolly-15k pipeline, Dirichlet(α=0.5) partitioning | ✅ Done |
+| Week 2 | Dolly-15k pipeline, Dirichlet(α=1) partitioning | ✅ Done |
 | Week 3 | FedProx/SCAFFOLD integration, checkpoint/convergence criteria | ✅ Done |
 | Week 4 | Core 18-combination (3 compression × 2 FL × 3 alpha) run script + compression×non-IID correlation analysis functions | ✅ Done |
 | **Week 5** | Redesign per advisor feedback + correlation/selection logic tests complete | ✅ Done (this branch) |
@@ -41,13 +41,13 @@ persist as PEFT quantization (LoRA→QLoRA) becomes more aggressive?
 
 ## Week 1~4 요약 (Week 1–4 Summary)
 - **Week 1**: PEFT 배선(LoRA/QLoRA/DoRA)
-- **Week 2**: Dolly-15k 파이프라인, Dirichlet(α=0.5) 파티셔닝
+- **Week 2**: Dolly-15k 파이프라인, Dirichlet(α=1) 파티셔닝
 - **Week 3**: FedProx/SCAFFOLD, 체크포인트, 수렴 기준, FL 통합 테스트
 - **Week 4**: `configs/experiment_config.yaml`, `src/evaluate.py`(압축률×α 상관관계 계산),
   `scripts/run_experiment.py`, `scripts/analyze_interaction.py`
 
 - **Week 1**: PEFT wiring (LoRA/QLoRA/DoRA)
-- **Week 2**: Dolly-15k pipeline, Dirichlet(α=0.5) partitioning
+- **Week 2**: Dolly-15k pipeline, Dirichlet(α=1) partitioning
 - **Week 3**: FedProx/SCAFFOLD, checkpoints, convergence criteria, FL integration tests
 - **Week 4**: `configs/experiment_config.yaml`, `src/evaluate.py` (compression×alpha correlation),
   `scripts/run_experiment.py`, `scripts/analyze_interaction.py`
@@ -58,7 +58,7 @@ persist as PEFT quantization (LoRA→QLoRA) becomes more aggressive?
 지도교수로부터 "이 연구의 중점을 압축률과 non-IID 강도의 상관관계로 두는
 게 좋겠다"는 피드백을 받아, core 설계를 3FL×2PEFT(6조합)에서 **3압축
 (LoRA/QLoRA 8bit/QLoRA 4bit) × 2FL(FedAvg/FedProx) × 3 Dirichlet
-α(0.1/0.5/1.0) = 18조합**으로 개정했습니다. SCAFFOLD는 core에서
+α(0.1/1/10) = 18조합**으로 개정했습니다. SCAFFOLD는 core에서
 제외했지만 `src/scaffold.py`와 관련 테스트는 그대로 유지했습니다. 모델도
 Qwen2.5-3B에서 **Qwen2.5-1.5B-Instruct**로 축소했습니다(지도교수 승인,
 GPU 비용 절감). 자세한 배경은 `week4` 브랜치의 "설계 노트" 절 참고.
@@ -67,7 +67,7 @@ Following advisor feedback that "this project's focus should be the
 correlation between compression rate and non-IID intensity," the core
 design was revised from 3 FL × 2 PEFT (6 combinations) to **3
 compression levels (LoRA/QLoRA-8bit/QLoRA-4bit) × 2 FL algorithms
-(FedAvg/FedProx) × 3 Dirichlet alphas (0.1/0.5/1.0) = 18 combinations**.
+(FedAvg/FedProx) × 3 Dirichlet alphas (0.1/1/10) = 18 combinations**.
 SCAFFOLD is dropped from the core design, though `src/scaffold.py` and
 its tests are kept as-is. The model was also downsized from Qwen2.5-3B to
 **Qwen2.5-1.5B-Instruct** (advisor-approved, to cut GPU cost). See the

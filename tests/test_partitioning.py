@@ -1,5 +1,6 @@
-"""6단계: Non-IID 파티셔닝 검증 (Subtask 1.1 — Dirichlet(alpha=0.5)가 실제로
-비IID 분배를 만들어내는지, alpha가 작을수록 더 비IID해지는지 확인).
+"""6단계: Non-IID 파티셔닝 검증 (Subtask 1.1 — Dirichlet(alpha=1)가 실제로
+비IID 분배를 만들어내는지, alpha가 작을수록 더 비IID해지는지 확인.
+지도교수 피드백: sweep alpha in {0.1, 1, 10}).
 
 더미 데이터 테스트(빠름, 네트워크 불필요)와 실제 Dolly-15k 전체(15,011개)
 데이터 테스트(네트워크 필요, @pytest.mark.network)로 나뉜다. Dolly 데이터는
@@ -11,8 +12,9 @@
     pytest tests/ -m "not network"
 
 Step 6: Verify non-IID partitioning (Subtask 1.1 — confirm that
-Dirichlet(alpha=0.5) actually produces a non-IID distribution, and that a
-smaller alpha yields stronger non-IID).
+Dirichlet(alpha=1) actually produces a non-IID distribution, and that a
+smaller alpha yields stronger non-IID. Advisor feedback: sweep alpha in
+{0.1, 1, 10}).
 
 Split into dummy-data tests (fast, no network) and real full Dolly-15k
 (15,011 examples) tests (needs network, @pytest.mark.network). The Dolly
@@ -66,7 +68,7 @@ def dolly_dataset() -> List[dict]:
 
 def test_min_threshold_resampling():
     dataset = make_dummy_dataset()
-    client_data = partition_by_category(dataset, num_clients=8, alpha=0.5, min_category_threshold=150)
+    client_data = partition_by_category(dataset, num_clients=8, alpha=1, min_category_threshold=150)
     total_b = sum(1 for items in client_data.values() for x in items if x["category"] == "B")
     assert total_b >= 150, "임계값 미만 카테고리가 리샘플링되지 않음"
 
@@ -79,21 +81,21 @@ def test_partition_is_non_iid():
 
 
 def test_alpha_controls_heterogeneity_strength():
-    """alpha=0.1 > alpha=0.5 > alpha=1.0 순으로 비IID 강도(heterogeneity_score)가
+    """alpha=0.1 > alpha=1 > alpha=10 순으로 비IID 강도(heterogeneity_score)가
     커야 함 — Dirichlet 파티셔닝이 의도대로 동작하는지에 대한 일반 검증.
 
     The non-IID strength (heterogeneity_score) should increase in the order
-    alpha=0.1 > alpha=0.5 > alpha=1.0 — a general check that Dirichlet
+    alpha=0.1 > alpha=1 > alpha=10 — a general check that Dirichlet
     partitioning behaves as intended."""
     dataset = make_dummy_dataset()
 
     scores = {}
-    for alpha in [1.0, 0.5, 0.1]:
+    for alpha in [10, 1, 0.1]:
         client_data = partition_by_category(dataset, num_clients=8, alpha=alpha, min_category_threshold=150, seed=1)
         scores[alpha] = heterogeneity_score(client_data)
 
     print(f"heterogeneity scores (dummy): {scores}")
-    assert scores[0.1] >= scores[0.5] >= scores[1.0] - 0.05, (
+    assert scores[0.1] >= scores[1] >= scores[10] - 0.05, (
         f"alpha가 작을수록 비IID가 강해야 하는데 순서가 어긋남: {scores}"
     )
 
@@ -115,7 +117,7 @@ def test_dolly_min_threshold_resampling(dolly_dataset):
     target_category = min(raw_counts, key=raw_counts.get)
     threshold = raw_counts[target_category] + 50
 
-    client_data = partition_by_category(dolly_dataset, num_clients=8, alpha=0.5, min_category_threshold=threshold)
+    client_data = partition_by_category(dolly_dataset, num_clients=8, alpha=1, min_category_threshold=threshold)
     total_target = sum(1 for items in client_data.values() for x in items if x["category"] == target_category)
     assert total_target >= threshold, f"{target_category} Categories are not resampled below the threshold."
 
@@ -131,40 +133,40 @@ def test_dolly_partition_is_non_iid(dolly_dataset):
     assert score > 0, "alpha=0.1 but heterogeneity_score is 0"
 
 
-# 아래 두 개(0.5, 1.0)는 test_dolly_partition_is_non_iid와 동일한 패턴의
+# 아래 두 개(1, 10)는 test_dolly_partition_is_non_iid와 동일한 패턴의
 # 육안 확인용 테스트다. score > 0은 사실상 항상 참이라 강한 검증은 아니고,
-# "0.1 >= 0.5 >= 1.0" 순서를 실제로 검증하는 건
+# "0.1 >= 1 >= 10" 순서를 실제로 검증하는 건
 # test_dolly_alpha_controls_heterogeneity_strength 쪽이다 — 여기 두 테스트는
 # 각 alpha에서 partition_by_category가 에러 없이 돌고, 클라이언트별 카테고리
 # 분포를 -s 옵션으로 눈으로 볼 수 있게 하는 용도.
 #
-# The two tests below (0.5, 1.0) follow the same visual-inspection pattern
+# The two tests below (1, 10) follow the same visual-inspection pattern
 # as test_dolly_partition_is_non_iid. score > 0 is nearly always true, so
-# it isn't a strong check — the real ordering check ("0.1 >= 0.5 >= 1.0")
+# it isn't a strong check — the real ordering check ("0.1 >= 1 >= 10")
 # lives in test_dolly_alpha_controls_heterogeneity_strength. These two are
 # for confirming partition_by_category runs cleanly at each alpha and for
 # eyeballing the per-client category distribution with `-s`.
 
 @pytest.mark.network
 def test_dolly_partition_is_moderately_non_iid(dolly_dataset):
-    client_data = partition_by_category(dolly_dataset, num_clients=8, alpha=0.5, min_category_threshold=20)
+    client_data = partition_by_category(dolly_dataset, num_clients=8, alpha=1, min_category_threshold=20)
     summary = summarize_partition(client_data)
     for client_id, counts in summary.items():
         print(f"client {client_id}: {counts}")
 
     score = heterogeneity_score(client_data)
-    assert score > 0, "alpha=0.5 but heterogeneity_score is 0"
+    assert score > 0, "alpha=1 but heterogeneity_score is 0"
 
 
 @pytest.mark.network
 def test_dolly_partition_is_near_iid(dolly_dataset):
-    client_data = partition_by_category(dolly_dataset, num_clients=8, alpha=1.0, min_category_threshold=20)
+    client_data = partition_by_category(dolly_dataset, num_clients=8, alpha=10, min_category_threshold=20)
     summary = summarize_partition(client_data)
     for client_id, counts in summary.items():
         print(f"client {client_id}: {counts}")
 
     score = heterogeneity_score(client_data)
-    assert score > 0, "alpha=1.0 but heterogeneity_score is 0"
+    assert score > 0, "alpha=10 but heterogeneity_score is 0"
 
 
 @pytest.mark.network
@@ -175,11 +177,11 @@ def test_dolly_alpha_controls_heterogeneity_strength(dolly_dataset):
     Confirms the same alpha ordering on the real full Dolly-15k dataset —
     re-validates the dummy-data test's intent against real data."""
     scores = {}
-    for alpha in [1.0, 0.5, 0.1]:
+    for alpha in [10, 1, 0.1]:
         client_data = partition_by_category(dolly_dataset, num_clients=8, alpha=alpha, min_category_threshold=20, seed=1)
         scores[alpha] = heterogeneity_score(client_data)
 
     print(f"heterogeneity scores (real Dolly-15k): {scores}")
-    assert scores[0.1] >= scores[0.5] >= scores[1.0] - 0.05, (
+    assert scores[0.1] >= scores[1] >= scores[10] - 0.05, (
         f"alpha가 작을수록 비IID가 강해야 하는데 순서가 어긋남: {scores}"
     )
