@@ -17,7 +17,7 @@ persist as PEFT quantization intensifies (LoRA→QLoRA)?
 | 주차 | 목표 | 상태 |
 |---|---|---|
 | Week 1 | 모델+GPU 환경 확인, PEFT 배선(LoRA/QLoRA/DoRA) | ✅ 완료 |
-| Week 2 | Dolly-15k 파이프라인, 파라미터 왕복, Dirichlet(α=0.5) 파티셔닝 | ✅ 완료 |
+| Week 2 | Dolly-15k 파이프라인, 파라미터 왕복, Dirichlet(α=1) 파티셔닝 | ✅ 완료 |
 | **Week 3** | FedProx/SCAFFOLD 통합, 체크포인트/수렴 기준, FL 통합 테스트 | ✅ 완료 (이 브랜치) |
 | Week 4 | Core 실험 실행(3압축×2FL×3α=18조합) + local-epoch 진단 | 예정 (`week4`) |
 | Week 5 | 압축률×non-IID 상관관계 분석 + 카테고리별 진단 | 예정 |
@@ -26,7 +26,7 @@ persist as PEFT quantization intensifies (LoRA→QLoRA)?
 | Week | Goal | Status |
 |---|---|---|
 | Week 1 | Verify model + GPU environment, wire up PEFT (LoRA/QLoRA/DoRA) | ✅ Done |
-| Week 2 | Dolly-15k pipeline, parameter round-trip, Dirichlet (α=0.5) partitioning | ✅ Done |
+| Week 2 | Dolly-15k pipeline, parameter round-trip, Dirichlet (α=1) partitioning | ✅ Done |
 | **Week 3** | FedProx/SCAFFOLD integration, checkpoint/convergence criteria, FL integration tests | ✅ Done (this branch) |
 | Week 4 | Run the core experiment (3 compression × 2 FL × 3 alpha = 18 combinations) + local-epoch diagnostic | Planned (`week4`) |
 | Week 5 | Compression×non-IID correlation analysis + per-category diagnostics | Planned |
@@ -39,12 +39,12 @@ persist as PEFT quantization intensifies (LoRA→QLoRA)?
 - **Week 1**: `src/models.py`(LoRA/QLoRA/DoRA 배선), `src/communication.py`(파라미터 헬퍼),
   wiring 테스트, dev pilot 스크립트
 - **Week 2**: `src/data.py`(Dolly-15k 로딩/토큰화/held-out), `src/partitioning.py`
-  (Dirichlet α=0.5 비IID 분배), roundtrip/partitioning 테스트
+  (Dirichlet α=1 비IID 분배), roundtrip/partitioning 테스트
 
 - **Week 1**: `src/models.py` (LoRA/QLoRA/DoRA wiring), `src/communication.py`
   (parameter helpers), wiring tests, dev pilot script
 - **Week 2**: `src/data.py` (Dolly-15k loading/tokenization/held-out),
-  `src/partitioning.py` (Dirichlet α=0.5 non-IID split), roundtrip/partitioning
+  `src/partitioning.py` (Dirichlet α=1 non-IID split), roundtrip/partitioning
   tests
 
 ## Week 3에서 한 일 — 이번 주가 가장 큰 덩어리입니다 (What Was Done in Week 3 — This Is the Biggest Chunk So Far)
