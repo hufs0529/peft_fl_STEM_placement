@@ -18,6 +18,13 @@
   강건성 스윕) — 3압축(lora/qlora_8bit/qlora_4bit) x 2FL(fedavg/fedprox)
   x 3alpha(0.1/1/10) 18조합에서, non-IID가 강해질수록(alpha가
   작을수록) 압축 페널티가 커지는지를 Pearson 상관계수로 정량화한다.
+  `compression` 인자로 qlora_8bit/qlora_4bit 중 어느 쪽과 비교할지 고를
+  수 있고(둘 다 계산해서 "4bit가 8bit보다 non-IID에 더 민감한가" 비교
+  가능), `higher_is_better=True`를 넘기면 ROUGE-L처럼 높을수록 좋은
+  지표도 부호가 안 뒤집힌 채로 그대로 쓸 수 있다.
+- per_category_compression_penalty: 위 상관관계 분석을 카테고리 단위로
+  쪼갠 버전 — 어떤 태스크 카테고리가 압축×non-IID 상호작용에 특히
+  취약한지 z-score로 스크리닝한다.
 
 Analysis functions computed from data that is already logged, at no extra
 GPU cost.
@@ -46,7 +53,14 @@ GPU cost.
   compression levels (lora/qlora_8bit/qlora_4bit) x 2 FL algorithms
   (fedavg/fedprox) x 3 alpha values (0.1/1/10), quantifies via a
   Pearson correlation coefficient whether the compression penalty grows
-  as non-IID intensity increases (alpha decreases).
+  as non-IID intensity increases (alpha decreases). The `compression`
+  argument picks which of qlora_8bit/qlora_4bit to compare against LoRA
+  (call it twice to compare "is 4-bit more sensitive to non-IID than
+  8-bit"), and `higher_is_better=True` lets a higher-is-better metric like
+  ROUGE-L be used without the sign flipping on you.
+- per_category_compression_penalty: the same correlation analysis broken
+  down per task category — screens (via z-score) which categories are
+  especially vulnerable to the compression x non-IID interaction.
 """
 
 from collections import defaultdict
@@ -166,19 +180,31 @@ def select_best_performing_combination(run_results: List[dict], performance_fiel
 
 
 def compute_compression_alpha_trend(
-    run_results: List[dict], performance_field: str = "val_perplexity"
+    run_results: List[dict],
+    performance_field: str = "val_perplexity",
+    compression: str = "qlora_4bit",
+    higher_is_better: bool = False,
 ) -> Dict[str, dict]:
     """지도교수 피드백: 압축률(compression) x Dirichlet 비IID 강도(alpha)
     상관관계 분석.
 
-    각 (fl, alpha) 지점에서 "압축 페널티" = QLoRA-4bit 성능 - LoRA(무압축)
-    성능을 구한다(performance_field는 낮을수록 좋다고 가정하므로, 양수면
-    압축이 성능을 해쳤다는 뜻). alpha가 작아질수록(non-IID가 강해질수록)
-    이 페널티가 커지는 경향이 있는지 Pearson 상관계수로 확인한다.
+    각 (fl, alpha) 지점에서 "압축 페널티" = `compression`(기본 QLoRA-4bit)
+    성능 - LoRA(무압축) 성능을 구한다. `higher_is_better=False`(기본,
+    PPL 등)면 penalty = compression - lora(양수면 압축이 성능을 해침),
+    `higher_is_better=True`(ROUGE-L 등)면 penalty = lora - compression으로
+    부호를 뒤집어서, 두 경우 모두 "penalty가 양수면 압축이 성능을 해쳤다"는
+    의미가 동일하게 유지되도록 한다 — ROUGE-L을 그대로(부호 변환 없이)
+    넣을 수 있게 하기 위함. alpha가 작아질수록(non-IID가 강해질수록) 이
+    페널티가 커지는 경향이 있는지 Pearson 상관계수로 확인한다.
 
     상관계수가 음수: alpha가 작을수록(non-IID가 강할수록) 페널티가
     커짐 -> 압축과 non-IID가 서로를 증폭시킴(악화 방향의 상호작용).
     0에 가까움: 압축 페널티가 non-IID 강도와 무관 -> 두 축이 독립적.
+    (이 부호 해석은 higher_is_better 값과 무관하게 항상 동일하다.)
+
+    qlora_8bit와 qlora_4bit를 둘 다 비교하고 싶으면 `compression`을
+    바꿔서 이 함수를 두 번 호출한다 — "4bit가 8bit보다 non-IID에 더
+    민감한가"(dose-response)를 두 상관계수를 비교해서 확인할 수 있다.
 
     run_results: [{"compression": "lora"|"qlora_8bit"|"qlora_4bit",
                     "fl": "fedavg"|"fedprox", "alpha": float,
@@ -188,16 +214,26 @@ def compute_compression_alpha_trend(
     and Dirichlet non-IID intensity (alpha).
 
     For each (fl, alpha) point, computes the "compression penalty" =
-    QLoRA-4bit performance - LoRA (uncompressed) performance
-    (performance_field is assumed lower-is-better, so a positive value
-    means compression hurt performance). Checks via a Pearson correlation
-    coefficient whether this penalty tends to grow as alpha decreases
-    (non-IID intensity increases).
+    `compression` (default QLoRA-4bit) performance - LoRA (uncompressed)
+    performance. With `higher_is_better=False` (default, e.g. PPL),
+    penalty = compression - lora (positive means compression hurt
+    performance); with `higher_is_better=True` (e.g. ROUGE-L), the sign is
+    flipped to penalty = lora - compression, so "positive penalty = hurt"
+    holds in both cases — this lets ROUGE-L be passed in as-is, with no
+    sign transformation needed by the caller. Checks via a Pearson
+    correlation coefficient whether this penalty tends to grow as alpha
+    decreases (non-IID intensity increases).
 
     Negative correlation: the penalty grows as alpha decreases (stronger
     non-IID) -> compression and non-IID amplify each other (an adverse
     interaction). Near zero: the compression penalty is independent of
-    non-IID intensity -> the two axes are independent.
+    non-IID intensity -> the two axes are independent. (This sign
+    interpretation is the same regardless of higher_is_better.)
+
+    To compare qlora_8bit and qlora_4bit, call this function twice with
+    different `compression` values — comparing the two correlation
+    coefficients answers "is 4-bit more sensitive to non-IID than 8-bit"
+    (a dose-response check).
 
     run_results: [{"compression": "lora"|"qlora_8bit"|"qlora_4bit",
                     "fl": "fedavg"|"fedprox", "alpha": float,
@@ -211,7 +247,10 @@ def compute_compression_alpha_trend(
 
     trends: Dict[str, dict] = {}
     for fl in fls:
-        penalties = [by_key[(fl, alpha, "qlora_4bit")] - by_key[(fl, alpha, "lora")] for alpha in alphas]
+        if higher_is_better:
+            penalties = [by_key[(fl, alpha, "lora")] - by_key[(fl, alpha, compression)] for alpha in alphas]
+        else:
+            penalties = [by_key[(fl, alpha, compression)] - by_key[(fl, alpha, "lora")] for alpha in alphas]
         # penalties가 전부 동일(분산 0)하면 numpy가 0으로 나누기 때문에
         # 상관계수가 NaN이 됨 -> "alpha와 무관하다"는 의미로 0.0을 명시적으로 반환.
         # If penalties have zero variance (all identical), numpy divides by
@@ -228,3 +267,110 @@ def compute_compression_alpha_trend(
         }
 
     return trends
+
+
+def per_category_compression_penalty(
+    run_results: List[dict],
+    compression: str = "qlora_4bit",
+    metric: str = "rouge_l",
+    higher_is_better: bool = True,
+    vulnerable_z_threshold: float = 1.0,
+) -> Dict[str, dict]:
+    """compute_compression_alpha_trend를 카테고리 단위로 쪼갠 버전 —
+    어떤 태스크 카테고리가 압축×non-IID 상호작용에 특히 취약한지 확인.
+
+    run_results의 각 원소는 한 (fl, alpha, compression) run의
+    per_category_breakdown() 출력을 "per_category" 키에 담고 있어야 한다:
+        {"fl": ..., "alpha": ..., "compression": "lora"|"qlora_8bit"|"qlora_4bit",
+         "per_category": {category: {"ppl": .., "rouge_l": .., "n": ..}, ...}}
+
+    카테고리별로:
+      1. 상대 페널티(relative penalty) = (lora - compression) / lora
+         (higher_is_better=False면 (compression - lora) / lora) — PPL처럼
+         카테고리마다 절대 스케일이 다른 지표를 비교 가능하게 만들기 위해
+         raw 차이가 아니라 상대 변화율을 쓴다.
+      2. fl x alpha 평균 상대 페널티(mean_relative_penalty)
+      3. fl별로 alpha와 상대 페널티의 Pearson 상관계수
+         (compute_compression_alpha_trend와 동일한 부호 해석 — 음수면
+         non-IID가 강할수록 그 카테고리의 페널티가 커짐)
+      4. 카테고리 간 mean_relative_penalty의 z-score. z >
+         vulnerable_z_threshold(기본 1.0)면 "취약 카테고리"로 플래그
+         (카테고리 수가 적어 엄밀한 유의성 검정이 아니라 상대적 스크리닝
+         용도임에 유의)
+
+    표본 크기(n)가 작은 카테고리는 페널티 값의 변동폭이 커서 z-score
+    순위가 흔들릴 수 있으므로, 반환값의 "n"을 항상 같이 확인할 것.
+
+    A per-category breakdown of compute_compression_alpha_trend — checks
+    which task categories are especially vulnerable to the compression x
+    non-IID interaction.
+
+    Each element of run_results must carry the per_category_breakdown()
+    output for one (fl, alpha, compression) run under the "per_category"
+    key (see the dict shape above).
+
+    Per category, this computes: (1) a relative penalty (not a raw
+    difference, since PPL's absolute scale differs across categories),
+    (2) its mean over fl x alpha, (3) a Pearson correlation between alpha
+    and the relative penalty per fl (same sign convention as
+    compute_compression_alpha_trend), and (4) a z-score of the per-category
+    mean penalty across categories — categories with z above
+    vulnerable_z_threshold (default 1.0) are flagged "vulnerable" (this is
+    a relative screening heuristic, not a significance test, since there
+    are typically only a handful of categories).
+
+    Categories with a small sample size (n) have noisier penalty estimates
+    and thus noisier z-score rankings — always check the returned "n"
+    alongside the flag.
+    """
+    import numpy as np
+
+    by_key = {(r["fl"], r["alpha"], r["compression"]): r["per_category"] for r in run_results}
+    alphas = sorted({r["alpha"] for r in run_results})
+    fls = sorted({r["fl"] for r in run_results})
+    categories = sorted({cat for r in run_results for cat in r["per_category"]})
+
+    per_category: Dict[str, dict] = {}
+    for cat in categories:
+        all_relative_penalties = []
+        correlation_by_fl: Dict[str, float] = {}
+        n_by_key: Dict[str, int] = {}
+        for fl in fls:
+            penalties_this_fl = []
+            for alpha in alphas:
+                lora_stats = by_key.get((fl, alpha, "lora"), {}).get(cat)
+                comp_stats = by_key.get((fl, alpha, compression), {}).get(cat)
+                if lora_stats is None or comp_stats is None:
+                    continue
+                lora_val, comp_val = lora_stats[metric], comp_stats[metric]
+                if higher_is_better:
+                    penalty = lora_val - comp_val
+                else:
+                    penalty = comp_val - lora_val
+                relative = penalty / lora_val if lora_val else 0.0
+                penalties_this_fl.append(relative)
+                all_relative_penalties.append(relative)
+                n_by_key[f"{fl}_a{alpha}"] = min(lora_stats["n"], comp_stats["n"])
+
+            if len(alphas) > 1 and len(penalties_this_fl) == len(alphas) and len(set(penalties_this_fl)) > 1:
+                correlation_by_fl[fl] = float(np.corrcoef(alphas, penalties_this_fl)[0, 1])
+            else:
+                correlation_by_fl[fl] = 0.0
+
+        per_category[cat] = {
+            "mean_relative_penalty": sum(all_relative_penalties) / len(all_relative_penalties)
+            if all_relative_penalties else 0.0,
+            "alpha_penalty_correlation": correlation_by_fl,
+            "n": n_by_key,
+        }
+
+    means = [v["mean_relative_penalty"] for v in per_category.values()]
+    mu = sum(means) / len(means) if means else 0.0
+    sigma = (sum((m - mu) ** 2 for m in means) / len(means)) ** 0.5 if means else 0.0
+
+    for v in per_category.values():
+        z = (v["mean_relative_penalty"] - mu) / sigma if sigma > 0 else 0.0
+        v["z_score"] = z
+        v["vulnerable"] = z > vulnerable_z_threshold
+
+    return per_category

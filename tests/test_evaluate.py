@@ -9,6 +9,7 @@ from src.evaluate import (
     compute_compression_alpha_trend,
     compute_interaction_effects,
     per_category_breakdown,
+    per_category_compression_penalty,
     select_best_performing_combination,
     select_largest_interaction_fl_algorithm,
     total_communication_cost,
@@ -131,3 +132,148 @@ def test_compute_compression_alpha_trend_near_zero_correlation_when_penalty_cons
     runs = _make_18_combo_runs(penalties=(2.0, 2.0, 2.0))
     trend = compute_compression_alpha_trend(runs, performance_field="val_perplexity")
     assert trend["fedavg"]["alpha_penalty_correlation"] == 0.0
+
+
+def test_compute_compression_alpha_trend_compares_qlora_8bit_separately():
+    """compression='qlora_8bit'을 넘기면 qlora_4bit이 아니라 8bit과 lora를
+    비교해야 함 — _make_18_combo_runs는 8bit 페널티가 항상 4bit의 절반이
+    되도록 설계돼 있으므로, 두 트렌드가 나란히 비교 가능해야 한다.
+
+    Passing compression='qlora_8bit' must compare 8-bit against lora, not
+    4-bit — _make_18_combo_runs is designed so the 8-bit penalty is always
+    half the 4-bit penalty, so the two trends should be directly
+    comparable."""
+    runs = _make_18_combo_runs(penalties=(3.0, 2.5, 0.5))
+    trend_4bit = compute_compression_alpha_trend(runs, performance_field="val_perplexity", compression="qlora_4bit")
+    trend_8bit = compute_compression_alpha_trend(runs, performance_field="val_perplexity", compression="qlora_8bit")
+
+    assert trend_4bit["fedavg"]["compression_penalty"] == [3.0, 2.5, 0.5]
+    assert trend_8bit["fedavg"]["compression_penalty"] == [1.5, 1.25, 0.25]
+    # 8bit도 4bit과 동일한 패턴(non-IID가 강할수록 페널티 증가)이어야 함
+    # 8-bit should show the same pattern as 4-bit (penalty grows with non-IID)
+    assert trend_8bit["fedavg"]["alpha_penalty_correlation"] < -0.9
+
+
+def _make_18_combo_runs_rouge(penalties=(0.30, 0.15, 0.05)):
+    """ROUGE-L(높을수록 좋음) 버전 — lora rouge_l=0.5 고정, qlora는 그보다
+    정확히 penalty만큼 낮은 rouge_l을 갖도록 구성 (penalty가 클수록 압축
+    피해가 큼).
+
+    ROUGE-L (higher-is-better) version — lora's rouge_l is fixed at 0.5,
+    qlora's rouge_l is exactly `penalty` lower (larger penalty = worse
+    compression hit)."""
+    runs = []
+    for alpha, penalty in zip((0.1, 1, 10), penalties):
+        for fl in ("fedavg", "fedprox"):
+            runs.append({"compression": "lora", "fl": fl, "alpha": alpha, "rouge_l": 0.5})
+            runs.append({"compression": "qlora_8bit", "fl": fl, "alpha": alpha, "rouge_l": 0.5 - penalty / 2})
+            runs.append({"compression": "qlora_4bit", "fl": fl, "alpha": alpha, "rouge_l": 0.5 - penalty})
+    return runs
+
+
+def test_compute_compression_alpha_trend_higher_is_better_keeps_penalty_sign_correct():
+    """ROUGE-L처럼 높을수록 좋은 지표를 higher_is_better=True로 넘기면,
+    PPL(낮을수록 좋음)과 동일하게 "penalty>0 = 압축이 성능을 해쳤다"는
+    의미가 유지돼야 함 — 부호를 반대로 읽는 실수를 막기 위한 회귀 테스트.
+
+    Passing higher_is_better=True for a higher-is-better metric like
+    ROUGE-L must preserve the same "penalty > 0 = compression hurt" meaning
+    as the PPL (lower-is-better) case — a regression test against reading
+    the sign backwards."""
+    runs = _make_18_combo_runs_rouge(penalties=(0.30, 0.15, 0.05))
+    trend = compute_compression_alpha_trend(runs, performance_field="rouge_l", higher_is_better=True)
+
+    penalties = trend["fedavg"]["compression_penalty"]
+    assert penalties[0] > penalties[1] > penalties[2] > 0
+    # PPL 케이스와 동일하게, alpha가 작을수록 페널티가 커지므로 음의 상관관계여야 함
+    assert trend["fedavg"]["alpha_penalty_correlation"] < -0.7
+    assert trend["fedprox"]["alpha_penalty_correlation"] < -0.7
+
+
+def test_compute_compression_alpha_trend_without_higher_is_better_flips_rouge_l_sign():
+    """대조군: higher_is_better를 안 넘기면(기본값 False) ROUGE-L의 penalty가
+    음수로 나와 "압축이 성능을 해쳤다"는 의미가 뒤집힌다는 것을 명시적으로
+    확인 — higher_is_better 인자가 왜 필요한지 보여주는 회귀 테스트.
+
+    Control: confirms that omitting higher_is_better (default False) for
+    ROUGE-L produces a negative penalty — inverting the "positive =
+    compression hurt" meaning. Documents why the higher_is_better argument
+    is needed."""
+    runs = _make_18_combo_runs_rouge(penalties=(0.30, 0.15, 0.05))
+    trend = compute_compression_alpha_trend(runs, performance_field="rouge_l")
+    assert trend["fedavg"]["compression_penalty"][0] < 0
+
+
+def _make_category_runs():
+    """카테고리별 압축×non-IID 상호작용 취약도 테스트용 가상 데이터.
+    creative_writing은 alpha가 작을수록(non-IID 강할수록) rouge_l이 크게
+    깎이도록(상대 페널티 0.60/0.20/0.04), closed_qa/general_qa는 alpha와
+    무관하게 작고 일정한 페널티(0.03/0.05)를 갖도록 설계 — creative_writing만
+    "취약 카테고리"로 플래그돼야 함.
+
+    Synthetic data for testing per-category vulnerability to the
+    compression x non-IID interaction. creative_writing is designed so
+    rouge_l drops sharply as alpha shrinks (relative penalty 0.60/0.20/0.04);
+    closed_qa/general_qa have small, alpha-independent penalties (0.03/0.05)
+    — only creative_writing should be flagged "vulnerable"."""
+    lora_per_cat = {
+        "creative_writing": {"rouge_l": 0.5, "n": 20},
+        "closed_qa": {"rouge_l": 0.5, "n": 20},
+        "general_qa": {"rouge_l": 0.5, "n": 20},
+    }
+    qlora_per_cat_by_alpha = {
+        0.1: {
+            "creative_writing": {"rouge_l": 0.20, "n": 20},
+            "closed_qa": {"rouge_l": 0.485, "n": 20},
+            "general_qa": {"rouge_l": 0.475, "n": 20},
+        },
+        1: {
+            "creative_writing": {"rouge_l": 0.40, "n": 20},
+            "closed_qa": {"rouge_l": 0.485, "n": 20},
+            "general_qa": {"rouge_l": 0.475, "n": 20},
+        },
+        10: {
+            "creative_writing": {"rouge_l": 0.48, "n": 20},
+            "closed_qa": {"rouge_l": 0.485, "n": 20},
+            "general_qa": {"rouge_l": 0.475, "n": 20},
+        },
+    }
+    runs = []
+    for alpha in (0.1, 1, 10):
+        runs.append({"fl": "fedavg", "alpha": alpha, "compression": "lora", "per_category": lora_per_cat})
+        runs.append({"fl": "fedavg", "alpha": alpha, "compression": "qlora_4bit", "per_category": qlora_per_cat_by_alpha[alpha]})
+    return runs
+
+
+def test_per_category_compression_penalty_flags_vulnerable_category():
+    runs = _make_category_runs()
+    result = per_category_compression_penalty(runs, compression="qlora_4bit", metric="rouge_l", higher_is_better=True)
+
+    assert result["creative_writing"]["vulnerable"] is True
+    assert result["closed_qa"]["vulnerable"] is False
+    assert result["general_qa"]["vulnerable"] is False
+    assert result["creative_writing"]["mean_relative_penalty"] > result["closed_qa"]["mean_relative_penalty"]
+    assert result["creative_writing"]["mean_relative_penalty"] > result["general_qa"]["mean_relative_penalty"]
+
+
+def test_per_category_compression_penalty_alpha_correlation_matches_vulnerability():
+    """취약 카테고리(creative_writing)는 페널티가 alpha가 작을수록 커지도록
+    설계됐으니 강한 음의 상관관계를, 안정적인 카테고리들은 alpha와
+    무관(상관계수 0)함을 확인.
+
+    The vulnerable category (creative_writing) was designed so its penalty
+    grows as alpha shrinks, so it should show a strong negative
+    correlation; the stable categories should be alpha-independent
+    (correlation 0)."""
+    runs = _make_category_runs()
+    result = per_category_compression_penalty(runs, compression="qlora_4bit", metric="rouge_l", higher_is_better=True)
+
+    assert result["creative_writing"]["alpha_penalty_correlation"]["fedavg"] < -0.7
+    assert result["closed_qa"]["alpha_penalty_correlation"]["fedavg"] == 0.0
+    assert result["general_qa"]["alpha_penalty_correlation"]["fedavg"] == 0.0
+
+
+def test_per_category_compression_penalty_reports_sample_size():
+    runs = _make_category_runs()
+    result = per_category_compression_penalty(runs, compression="qlora_4bit", metric="rouge_l", higher_is_better=True)
+    assert result["creative_writing"]["n"]["fedavg_a0.1"] == 20

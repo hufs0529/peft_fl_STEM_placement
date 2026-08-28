@@ -162,10 +162,14 @@ is run. This script computes three things:
 1. **압축률×α 격자** — 18개 조합의 val_perplexity를 (압축, FL, α) 격자로
    출력합니다.
 2. **Subtask 1.3 압축률×non-IID 상관관계** — 각 (FL, α) 지점에서
-   "압축 페널티"(QLoRA-4bit 성능 − LoRA(무압축) 성능)를 구하고, α가
-   작아질수록(non-IID가 강해질수록) 이 페널티가 커지는지를 Pearson
-   상관계수로 계산합니다. 이것이 지도교수 피드백("압축률과 non-IID
-   강도의 상관관계를 보라")에 대한 직접적인 정량적 답입니다
+   "압축 페널티"(QLoRA-4bit/8bit 각각의 성능 − LoRA(무압축) 성능)를
+   구하고, α가 작아질수록(non-IID가 강해질수록) 이 페널티가 커지는지를
+   Pearson 상관계수로 계산합니다. **4bit와 8bit을 각각 따로 계산**해서
+   나란히 비교하고(4bit 상관계수가 8bit보다 더 음수면, 압축이 강할수록
+   non-IID 민감도도 커지는 dose-response), **PPL뿐 아니라 ROUGE-L(높을수록
+   좋음, `higher_is_better=True`)로도** 같은 계산을 반복해 두 성능 지표가
+   같은 결론을 가리키는지 교차검증합니다. 이것이 지도교수 피드백("압축률과
+   non-IID 강도의 상관관계를 보라")에 대한 직접적인 정량적 답입니다
    (`src/evaluate.py::compute_compression_alpha_trend`).
 3. **Subtask 2.2 대상 선정** — 18조합 중 task performance가 가장 좋았던
    조합을 골라, local_epochs=5 강건성 점검 대상으로 삼습니다.
@@ -173,15 +177,81 @@ is run. This script computes three things:
 1. **Compression×alpha grid** — prints the val_perplexity of all 18
    combinations as a (compression, FL, alpha) grid.
 2. **Subtask 1.3 compression×non-IID correlation** — at each (FL, alpha)
-   point, computes the "compression penalty" (QLoRA-4bit minus
-   LoRA/uncompressed performance), and its Pearson correlation with
+   point, computes the "compression penalty" (QLoRA-4bit/8bit performance
+   minus LoRA/uncompressed performance), and its Pearson correlation with
    alpha to check whether the penalty grows as alpha decreases (non-IID
-   intensifies). This is the direct quantitative answer to the advisor's
+   intensifies). **4-bit and 8-bit are computed separately** and compared
+   side by side (a more negative correlation for 4-bit than 8-bit is a
+   dose-response signal), and the same computation is **repeated for
+   ROUGE-L** (higher-is-better, `higher_is_better=True`) in addition to
+   PPL, to cross-check whether the two performance metrics point the same
+   direction. This is the direct quantitative answer to the advisor's
    feedback ("look at the correlation between compression rate and
    non-IID intensity") (`src/evaluate.py::compute_compression_alpha_trend`).
 3. **Subtask 2.2 target selection** — picks the combination among the 18
    with the best task performance as the target for the local_epochs=5
    robustness check.
+
+### 파일럿으로 num_rounds 상한 역산 (Deriving the num_rounds Ceiling via a Pilot Run)
+
+`experiment_config.yaml`의 `federated.num_rounds`(현재 10)는 수렴 기준(3라운드
+연속 <1% 개선)이 인위적인 캡에 막히지 않고 실제로 발동할 만큼 넉넉해야
+합니다. 18조합 중 가장 늦게 수렴할 것으로 예상되는 조합(`qlora --qlora-bits
+4 --alpha 0.1` — 가장 강한 압축 × 가장 강한 non-IID)으로 먼저 파일럿을
+돌려서 실제 `converged_round`를 확인한 뒤 역산하는 것을 권장합니다:
+
+```bash
+# 1) 캡을 넉넉하게 풀고 파일럿 1회 실행 (본 18조합 실행 전에)
+python scripts/run_experiment.py --peft qlora --qlora-bits 4 --fl fedavg --alpha 0.1 --num-rounds 30
+
+# 2) 출력의 "수렴 라운드"(converged_round)를 확인 후, 그 값 + 여유분(예: +3~5)을
+#    experiment_config.yaml의 federated.num_rounds에 반영
+# 3) 이 파일럿 run은 core 18조합 중 하나(qlora_4bit/fedavg/alpha=0.1)와 run_name이
+#    동일하므로, 자연 수렴했다면 재실행할 필요 없이 그대로 core 결과로 재사용됩니다.
+```
+
+`--num-rounds`는 이 파일럿 1회성 오버라이드 전용입니다 — 본 18조합
+실행에서는 `experiment_config.yaml`에 반영한 값을 그대로 쓰면 되므로
+매번 넘길 필요가 없습니다. 18조합을 모두 돌린 뒤에는 각 결과의
+`converged_round`가 `None`(=끝까지 수렴 못 함)인 조합이 없는지 반드시
+확인하세요 — 있다면 그 조합만 라운드 부족으로 잘린 것이라 압축×α
+상관분석에서 "진짜 압축이 나쁘다"와 구분되지 않는 아티팩트가 됩니다.
+
+> 이 저장소를 개발 중인 로컬 환경(GPU 없음, `torch.cuda.is_available()
+> == False`)에서는 QLoRA 파일럿을 실제로 실행할 수 없습니다 — 위 절차는
+> 6번 섹션의 GPU 인스턴스에서 실행해야 합니다.
+
+`experiment_config.yaml`'s `federated.num_rounds` (currently 10) needs to
+be generous enough that the convergence criterion (3 consecutive rounds of
+<1% improvement) actually fires rather than being cut off by an arbitrary
+cap. It's recommended to first pilot the combination expected to converge
+slowest among the 18 (`qlora --qlora-bits 4 --alpha 0.1` — the heaviest
+compression × strongest non-IID) with a generous cap, read off its actual
+`converged_round`, and derive the ceiling from that:
+
+```bash
+# 1) Run one pilot with a generous cap (before the full 18-combination run)
+python scripts/run_experiment.py --peft qlora --qlora-bits 4 --fl fedavg --alpha 0.1 --num-rounds 30
+
+# 2) Read "converged_round" off the output, and set experiment_config.yaml's
+#    federated.num_rounds to that value plus a margin (e.g. +3-5)
+# 3) This pilot run shares its run_name with one of the core 18 combinations
+#    (qlora_4bit/fedavg/alpha=0.1), so if it converged naturally there's no
+#    need to rerun it — it's reused as-is for the core results.
+```
+
+`--num-rounds` is meant only for this one-off pilot override — the full 18
+runs can just use the value baked into `experiment_config.yaml`, no need to
+pass it every time. After all 18 are done, make sure none of them have a
+`converged_round` of `None` (never converged within budget) — if one does,
+that combination was truncated by the round cap, which is indistinguishable
+from a genuinely worse compression penalty in the compression×alpha
+correlation analysis.
+
+> This repo's local development environment (no GPU,
+> `torch.cuda.is_available() == False`) cannot actually run a QLoRA pilot
+> — the procedure above needs to run on the GPU instance described in
+> section 6.
 
 ### Task 2 진단 실행 (Task 2 Diagnostic Execution)
 
@@ -323,12 +393,23 @@ to pass.
 ### `src/evaluate.py` — Subtask 1.3, 2.2, 2.3
 - `compute_compression_alpha_trend`: **지도교수 피드백에 대한 직접적인
   답**을 계산하는 함수. 18조합의 성능값에서 각 (FL, α) 지점의 "압축
-  페널티"(QLoRA-4bit − LoRA)를 구하고, α와 페널티의 Pearson 상관계수를
-  산출합니다. `performance_field`로 `val_perplexity`(성능)와
-  `rounds_run`(수렴 속도, 완전 무료로 이미 로깅된 값) 둘 다에 대해
-  계산해 두 지표가 같은 방향을 가리키는지 교차검증합니다
-  (`scripts/analyze_interaction.py`). 페널티가 alpha와 무관(분산 0)하면
-  NaN 대신 0.0을 반환하도록 처리돼 있습니다.
+  페널티"(`compression` 인자로 고른 QLoRA-4bit 또는 8bit − LoRA)를 구하고,
+  α와 페널티의 Pearson 상관계수를 산출합니다. `performance_field`로
+  `val_perplexity`(성능)와 `rounds_run`(수렴 속도, 완전 무료로 이미
+  로깅된 값) 둘 다에 대해 계산해 두 지표가 같은 방향을 가리키는지
+  교차검증합니다(`scripts/analyze_interaction.py`). ROUGE-L처럼
+  높을수록 좋은 지표는 `higher_is_better=True`를 넘기면 부호 변환 없이
+  그대로 쓸 수 있습니다(안 넘기면 penalty 부호가 반대로 나옴에 유의).
+  페널티가 alpha와 무관(분산 0)하면 NaN 대신 0.0을 반환하도록
+  처리돼 있습니다.
+- `per_category_compression_penalty`: 위 상관관계 분석을 카테고리
+  단위로 쪼갠 버전. 각 태스크 카테고리의 상대 페널티(절대 차이가 아니라
+  `(lora-compression)/lora` 비율 — 카테고리마다 다른 PPL 절대 스케일
+  문제를 피하기 위함) 평균과, 카테고리 간 z-score(기본 임계값 1.0 초과면
+  `vulnerable=True`)를 계산해 "어떤 카테고리가 압축×non-IID 상호작용에
+  특히 취약한가"를 스크리닝합니다. 카테고리 수가 적어(Dolly 8종) 엄밀한
+  유의성 검정이 아니라 상대적 순위 매기기 용도이며, 표본 크기(`n`)가
+  작은 카테고리는 별도로 표시됩니다.
 - `select_best_performing_combination`: Subtask 2.2에서 local_epochs=5
   점검 대상을 고릅니다(18조합 전체 대상).
 - `per_category_breakdown`, `total_communication_cost`: Subtask 2.3
@@ -345,14 +426,26 @@ to pass.
 ### `src/evaluate.py` — Subtask 1.3, 2.2, 2.3
 - `compute_compression_alpha_trend`: the function that computes **the
   direct answer to the advisor's feedback**. From the performance values
-  of the 18 combinations, it derives the "compression penalty"
-  (QLoRA-4bit minus LoRA) at each (FL, alpha) point, and its Pearson
-  correlation with alpha. It is computed for both `val_perplexity`
-  (performance) and `rounds_run` (convergence speed, a value already
-  logged for free) via `performance_field`, so the two metrics can be
-  cross-checked for whether they point the same direction
-  (`scripts/analyze_interaction.py`). Returns 0.0 instead of NaN when the
-  penalty is independent of alpha (zero variance).
+  of the 18 combinations, it derives the "compression penalty" (QLoRA-4bit
+  or 8-bit, picked via the `compression` argument, minus LoRA) at each
+  (FL, alpha) point, and its Pearson correlation with alpha. It is
+  computed for both `val_perplexity` (performance) and `rounds_run`
+  (convergence speed, a value already logged for free) via
+  `performance_field`, so the two metrics can be cross-checked for whether
+  they point the same direction (`scripts/analyze_interaction.py`). A
+  higher-is-better metric like ROUGE-L can be passed in as-is with
+  `higher_is_better=True` (omitting it flips the penalty's sign). Returns
+  0.0 instead of NaN when the penalty is independent of alpha (zero
+  variance).
+- `per_category_compression_penalty`: a per-category breakdown of the
+  correlation analysis above. Computes each task category's mean relative
+  penalty (a ratio, `(lora-compression)/lora`, rather than a raw
+  difference, to avoid categories' differing absolute PPL scales), and a
+  z-score across categories (`vulnerable=True` above the default threshold
+  of 1.0), to screen which categories are especially vulnerable to the
+  compression × non-IID interaction. With only a handful of categories
+  (8 in Dolly), this is relative-ranking screening, not a significance
+  test — categories with a small sample size (`n`) are flagged separately.
 - `select_best_performing_combination`: picks the target for the
   local_epochs=5 check in Subtask 2.2 (now scoped over all 18
   combinations).
@@ -409,7 +502,7 @@ pytest tests/ -v
 | `test_fl_integration.py` | FedAvg/FedProx/SCAFFOLD 세 경로 모두 전체 루프 통과, SCAFFOLD의 `local_control` 라운드 간 유지, FedProx fit() 정상 동작 | Week 3 |
 | `test_convergence.py` | 3라운드 연속 <1% 개선 시 실제로 멈추는지, 큰 폭 개선 중에는 안 멈추는지 | Week 3 |
 | `test_checkpointing.py` | 저장 후 재개 시 라운드/상태가 정확히 복원되는지 | Week 3 |
-| `test_evaluate.py` | 카테고리별 분해, fairness variance, **압축률×α 상관관계 계산**(페널티 값·음의 상관관계·상수 페널티일 때 0.0), **최고 성능 조합 선정**, (레거시) 상호작용 효과 계산 | Week 4~5 |
+| `test_evaluate.py` | 카테고리별 분해, fairness variance, **압축률×α 상관관계 계산**(페널티 값·음의 상관관계·상수 페널티일 때 0.0·qlora_8bit 비교·ROUGE-L `higher_is_better` 부호), **카테고리별 취약도 스크리닝**(`per_category_compression_penalty`), **최고 성능 조합 선정**, (레거시) 상호작용 효과 계산 | Week 4~6 |
 
 | File | What it verifies | Corresponding week |
 |---|---|---|
@@ -419,7 +512,7 @@ pytest tests/ -v
 | `test_fl_integration.py` | all three of FedAvg/FedProx/SCAFFOLD complete the full loop; SCAFFOLD's `local_control` is preserved across rounds; FedProx's `fit()` runs correctly | Week 3 |
 | `test_convergence.py` | actually stops after 3 consecutive rounds of <1% improvement; does not stop while improvements are large | Week 3 |
 | `test_checkpointing.py` | round/state are restored exactly after save-then-resume | Week 3 |
-| `test_evaluate.py` | per-category breakdown, fairness variance, **compression×alpha correlation** (penalty values, negative correlation, 0.0 for constant penalty), **selecting the best-performing combination**, (legacy) interaction-effect computation | Week 4-5 |
+| `test_evaluate.py` | per-category breakdown, fairness variance, **compression×alpha correlation** (penalty values, negative correlation, 0.0 for constant penalty, qlora_8bit comparison, ROUGE-L `higher_is_better` sign), **per-category vulnerability screening** (`per_category_compression_penalty`), **selecting the best-performing combination**, (legacy) interaction-effect computation | Week 4-6 |
 
 ---
 
@@ -478,6 +571,12 @@ pip install -r requirements.txt
   (0.1/1/10)**만으로 계산한 Pearson 상관계수입니다 — 지점이 적어
   비선형적인 패턴(예: 중간 α에서 페널티가 가장 큰 U자형)은 놓칠 수
   있습니다.
+- `per_category_compression_penalty`의 카테고리별 취약도 z-score는
+  **Dolly 카테고리가 8종뿐**이고 `rouge_l_sample_size`(기본 200)를
+  카테고리로 층화하면 카테고리당 표본이 ~25개에 불과해, 엄밀한 통계적
+  유의성 검정이 아니라 **상대적 스크리닝**으로만 해석해야 합니다 —
+  표본이 특히 적은 카테고리(반환값의 `n`)는 순위가 시드에 따라 흔들릴
+  수 있습니다.
 - 코드 전체는 **문법 검증만 마쳤고 실제 GPU 환경에서 아직 실행되지 않았습니다.**
   Week 1 첫날 `pytest tests/`부터 돌려서 실제 동작을 확인하세요.
 
@@ -508,6 +607,13 @@ pip install -r requirements.txt
   a Pearson correlation computed from only **3 alpha points (0.1/1/10)**
   — with so few points, a non-linear pattern (e.g., a U-shape where the
   penalty peaks at a middle alpha) could be missed.
+- `per_category_compression_penalty`'s per-category vulnerability z-scores
+  are computed over only **8 Dolly categories**, and stratifying
+  `rouge_l_sample_size` (200 by default) across them leaves only ~25
+  examples per category — this should be read as **relative screening**,
+  not a rigorous significance test, and categories with a particularly
+  small sample (`n` in the return value) may have rankings that shift
+  across seeds.
 - The entire codebase has **only passed syntax verification and has not
   yet been run in an actual GPU environment.** Start by running
   `pytest tests/` on Week 1's first day to confirm real behaviour.

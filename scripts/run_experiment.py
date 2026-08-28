@@ -123,12 +123,26 @@ def main():
              "advisor feedback: QLoRA compression bit-width sweep (default 4, "
              "qlora only)",
     )
+    parser.add_argument(
+        "--num-rounds", type=int, default=None,
+        help="num_rounds 상한 오버라이드. 파일럿으로 가장 어려운 조합"
+             "(qlora --qlora-bits 4 --alpha 0.1)을 넉넉한 캡으로 먼저 돌려서 "
+             "실제 converged_round를 확인한 뒤, 본 18조합의 num_rounds를 "
+             "역산해서 정하는 용도 (README '파일럿으로 num_rounds 상한 역산' "
+             "절 참고) / override the num_rounds ceiling. Meant for running a "
+             "pilot on the hardest combination (qlora --qlora-bits 4 --alpha "
+             "0.1) with a generous cap first, reading off its actual "
+             "converged_round, then deriving the num_rounds ceiling for the "
+             "full 18-combination run from it (see the README's 'Deriving "
+             "the num_rounds ceiling via a pilot run' section)",
+    )
     args = parser.parse_args()
 
     overrides = {
         "peft.type": args.peft,
         "fl_algorithm.type": args.fl,
         "federated.local_epochs": args.local_epochs,
+        "federated.num_rounds": args.num_rounds,
         "partitioning.alpha": args.alpha,
         "peft.qlora_bits": args.qlora_bits,
     }
