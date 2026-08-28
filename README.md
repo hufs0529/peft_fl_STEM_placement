@@ -364,8 +364,20 @@ to pass.
   나머지는 순수 중복 계산이기 때문입니다. ROUGE-L(생성 필요)은 매 라운드가
   아니라 **루프 종료 후 최종 global 파라미터로 딱 1회만**, 카테고리 층화
   샘플(`config['data']['rouge_l_sample_size']`)에 대해 계산합니다.
-- **로깅**: `communication_bytes_this_round`(통신비용의 재료)를 매 라운드
-  `results/logs/{run_name}_rounds.jsonl`에 씁니다.
+- **로깅**: 매 라운드 `round_record`(→ `results/logs/{run_name}_rounds.jsonl`에
+  한 줄씩 append)에 `round`, `val_loss`, `val_perplexity`,
+  `round_latency_sec`, `communication_bytes_this_round`, **`peak_vram_gb`**
+  (그 라운드 참여 클라이언트들의 평균 — FedAvg/FedProx만, `fl_client.py`의
+  `fit()`이 `track_vram_and_latency()`로 이미 계측한 값)를 기록합니다.
+  마지막 라운드에는 `rouge_l`도 추가되고, 생성 결과는 별도로
+  `results/logs/{run_name}_generations.jsonl`에 저장됩니다. 루프가 끝나면
+  `run_federated_training()`의 반환값(호출부에서 최종 요약으로 씀)에
+  `total_communication_bytes`, **`total_latency_sec`**(라운드별
+  `round_latency_sec` 합), **`avg_peak_vram_gb`**(라운드별 `peak_vram_gb`
+  평균)까지 추가됩니다 — 압축×non-IID 트레이드오프 분석에 필요한 통신/
+  시간/메모리 지표가 전부 이 두 곳(`*_rounds.jsonl` 파일 + 반환값)에
+  남습니다. SCAFFOLD는 `scaffold_client_fit()`이 이 계측을 하지 않아
+  `peak_vram_gb`가 `None`으로 남습니다(core 분석에서 제외돼 있어 의도적).
 - **W&B**: `config['logging']['use_wandb']=true`면 실시간으로 같은 지표를
   W&B 대시보드에도 올립니다.
 
@@ -384,9 +396,24 @@ to pass.
   computed **only once, after the loop ends, on the final global
   parameters**, against a category-stratified sample
   (`config['data']['rouge_l_sample_size']`), rather than every round.
-- **Logging**: writes `communication_bytes_this_round` (the raw material
-  for communication cost) to `results/logs/{run_name}_rounds.jsonl` every
-  round.
+- **Logging**: every round's `round_record` (appended as one line to
+  `results/logs/{run_name}_rounds.jsonl`) carries `round`, `val_loss`,
+  `val_perplexity`, `round_latency_sec`, `communication_bytes_this_round`,
+  and **`peak_vram_gb`** (averaged over that round's participating
+  clients — FedAvg/FedProx only, already measured by `fit()` in
+  `fl_client.py` via `track_vram_and_latency()`). The last round also gets
+  `rouge_l`, and generations are saved separately to
+  `results/logs/{run_name}_generations.jsonl`. Once the loop ends,
+  `run_federated_training()`'s return value (used by the caller as the
+  final summary) adds `total_communication_bytes`, **`total_latency_sec`**
+  (the sum of each round's `round_latency_sec`), and
+  **`avg_peak_vram_gb`** (the average of each round's `peak_vram_gb`) —
+  so every metric needed for the compression×non-IID trade-off analysis
+  (communication/time/memory) ends up in these two places (the
+  `*_rounds.jsonl` file and the return value). SCAFFOLD's
+  `scaffold_client_fit()` doesn't perform this measurement, so its
+  `peak_vram_gb` stays `None` (intentional, since it's excluded from the
+  core analysis).
 - **W&B**: if `config['logging']['use_wandb']=true`, the same metrics are
   also pushed to the W&B dashboard in real time.
 
@@ -499,9 +526,12 @@ pytest tests/ -v
 | `test_model_wiring.py` | LoRA/QLoRA(4bit·8bit)/DoRA 배선, 정의되지 않은 PEFT type이 `ValueError`를 내는지 | Week 1, 2(8bit 추가) |
 | `test_roundtrip.py` | FL 파라미터 송수신 시 값/순서 보존 | Week 2 |
 | `test_partitioning.py` | 최소 카테고리 임계값 리샘플링, α가 작을수록 실제로 더 비IID한지 | Week 2 |
-| `test_fl_integration.py` | FedAvg/FedProx/SCAFFOLD 세 경로 모두 전체 루프 통과, SCAFFOLD의 `local_control` 라운드 간 유지, FedProx fit() 정상 동작 | Week 3 |
+| `test_data.py` | 프롬프트 포맷, **라벨 마스킹**(-100이 prompt 구간만 정확히 덮는지), held-out 카테고리 균등 분할, ROUGE-L용 카테고리 층화 샘플링, 클라이언트 DataLoader 구성 (`load_raw_dolly15k`만 네트워크 마커) | Week 2 |
+| `test_fl_integration.py` | FedAvg/FedProx/SCAFFOLD 세 경로 모두 전체 루프 통과, SCAFFOLD의 `local_control` 라운드 간 유지, FedProx fit() 정상 동작, **`peak_vram_gb`/`total_latency_sec` 집계** | Week 3 |
 | `test_convergence.py` | 3라운드 연속 <1% 개선 시 실제로 멈추는지, 큰 폭 개선 중에는 안 멈추는지 | Week 3 |
 | `test_checkpointing.py` | 저장 후 재개 시 라운드/상태가 정확히 복원되는지 | Week 3 |
+| `test_metrics.py` | ROUGE-L 계산(동일 문자열/무관한 문자열/평균), trainable parameter 집계, VRAM/latency 계측 컨텍스트 매니저, 응답 생성 | Week 3 |
+| `test_scaffold.py` | control variate 집계 수식이 손으로 계산한 값과 일치하는지(delta_y 평균, 참여율에 따른 global_control 스케일링), 로컬 학습 1스텝이 실제로 파라미터를 갱신하는지 | Week 3 |
 | `test_evaluate.py` | 카테고리별 분해, fairness variance, **압축률×α 상관관계 계산**(페널티 값·음의 상관관계·상수 페널티일 때 0.0·qlora_8bit 비교·ROUGE-L `higher_is_better` 부호), **카테고리별 취약도 스크리닝**(`per_category_compression_penalty`), **최고 성능 조합 선정**, (레거시) 상호작용 효과 계산 | Week 4~6 |
 
 | File | What it verifies | Corresponding week |
@@ -509,9 +539,12 @@ pytest tests/ -v
 | `test_model_wiring.py` | LoRA/QLoRA (4-bit/8-bit)/DoRA wiring; that an undefined PEFT type raises `ValueError` | Week 1, 2 (8-bit added) |
 | `test_roundtrip.py` | value/order preservation when FL parameters are sent and received | Week 2 |
 | `test_partitioning.py` | minimum-category-threshold resampling; that a smaller α actually produces a more non-IID split | Week 2 |
-| `test_fl_integration.py` | all three of FedAvg/FedProx/SCAFFOLD complete the full loop; SCAFFOLD's `local_control` is preserved across rounds; FedProx's `fit()` runs correctly | Week 3 |
+| `test_data.py` | prompt formatting, **label masking** (that -100 covers exactly the prompt span), even category split for the held-out set, category-stratified sampling for ROUGE-L, client DataLoader construction (only `load_raw_dolly15k` is network-marked) | Week 2 |
+| `test_fl_integration.py` | all three of FedAvg/FedProx/SCAFFOLD complete the full loop; SCAFFOLD's `local_control` is preserved across rounds; FedProx's `fit()` runs correctly; **`peak_vram_gb`/`total_latency_sec` aggregation** | Week 3 |
 | `test_convergence.py` | actually stops after 3 consecutive rounds of <1% improvement; does not stop while improvements are large | Week 3 |
 | `test_checkpointing.py` | round/state are restored exactly after save-then-resume | Week 3 |
+| `test_metrics.py` | ROUGE-L computation (identical/unrelated strings, averaging), trainable parameter counting, the VRAM/latency measurement context manager, response generation | Week 3 |
+| `test_scaffold.py` | that the control-variate aggregation formulas match hand-computed values (delta_y averaging, global_control scaling by participation rate); that one local training step actually updates parameters | Week 3 |
 | `test_evaluate.py` | per-category breakdown, fairness variance, **compression×alpha correlation** (penalty values, negative correlation, 0.0 for constant penalty, qlora_8bit comparison, ROUGE-L `higher_is_better` sign), **per-category vulnerability screening** (`per_category_compression_penalty`), **selecting the best-performing combination**, (legacy) interaction-effect computation | Week 4-6 |
 
 ---
