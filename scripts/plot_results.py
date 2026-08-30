@@ -1,10 +1,14 @@
 """18조합(3압축 x 2FL x 3α) 결과 시각화 템플릿.
 
 results/logs/*_rounds.jsonl에서 실제 실행 결과를 읽어 PPL/ROUGE-L/통신량/
-수렴속도 도표를 results/figures/에 생성한다. 아직 실행된 로그가 하나도
-없으면 형태를 미리 볼 수 있도록 샘플 데이터로 대체하고, 각 그림에
-"SAMPLE DATA" 워터마크를 남긴다 — 실제 로그가 생기면 그대로 다시 실행하면
-자동으로 진짜 데이터로 그려진다.
+수렴속도/**peak VRAM/총 학습 시간** 도표를 results/figures/에 생성한다.
+아직 실행된 로그가 하나도 없으면 형태를 미리 볼 수 있도록 샘플 데이터로
+대체하고, 각 그림에 "SAMPLE DATA" 워터마크를 남긴다 — 실제 로그가 생기면
+그대로 다시 실행하면 자동으로 진짜 데이터로 그려진다.
+
+peak_vram_gb는 alpha와 거의 무관(압축 강도에만 좌우)해야 정상이므로,
+`peak_vram_vs_alpha.png`에서 선이 평평한지가 그 자체로 "압축의 메모리
+이점이 non-IID 강도와 독립적인가"를 검증하는 시각적 체크가 된다.
 
 사용법:
     python scripts/plot_results.py
@@ -13,10 +17,16 @@ A visualization template for the 18-combination (3 compression x 2 FL x 3
 alpha) results.
 
 Reads actual run results from results/logs/*_rounds.jsonl and produces
-PPL/ROUGE-L/communication/convergence-speed figures into results/figures/.
-If no logs exist yet, falls back to sample data so the shape can be
-previewed now, watermarking each figure "SAMPLE DATA" — once real logs
-exist, re-running this script draws the real data automatically.
+PPL/ROUGE-L/communication/convergence-speed/**peak VRAM/total training
+latency** figures into results/figures/. If no logs exist yet, falls back
+to sample data so the shape can be previewed now, watermarking each figure
+"SAMPLE DATA" — once real logs exist, re-running this script draws the
+real data automatically.
+
+peak_vram_gb should be roughly independent of alpha (driven only by
+compression level), so whether the lines in `peak_vram_vs_alpha.png` are
+flat is itself a visual check of "is the compression memory benefit
+independent of non-IID intensity".
 
 Usage:
     python scripts/plot_results.py
@@ -73,12 +83,15 @@ def load_real_results() -> Optional[List[dict]]:
                 with open(path) as f:
                     lines = [json.loads(line) for line in f]
                 last = lines[-1]
+                vram_values = [r["peak_vram_gb"] for r in lines if r.get("peak_vram_gb") is not None]
                 results.append({
                     "compression": compression, "fl": fl, "alpha": alpha,
                     "val_perplexity": last["val_perplexity"],
                     "rouge_l": last.get("rouge_l"),
                     "total_communication_bytes": sum(r["communication_bytes_this_round"] for r in lines),
                     "rounds_run": len(lines),
+                    "total_latency_sec": sum(r["round_latency_sec"] for r in lines),
+                    "peak_vram_gb": sum(vram_values) / len(vram_values) if vram_values else None,
                 })
     return results
 
@@ -93,6 +106,17 @@ def make_sample_results() -> List[dict]:
     rng = random.Random(7)
     base_ppl = {0.1: 12.0, 1: 9.0, 10: 7.5}
     penalty_scale = {"lora": 0.0, "qlora_8bit": 0.4, "qlora_4bit": 1.0}
+    # peak_vram_gb: 압축이 강할수록 낮고(양자화가 base 모델 메모리를 줄임),
+    # alpha와는 거의 무관해야 정상 — 상관관계가 보이면 오히려 이상 신호.
+    # peak_vram_gb: lower for heavier compression (quantization shrinks the
+    # base model's memory footprint), and should be ~flat across alpha — a
+    # visible alpha trend here would itself be a red flag.
+    base_vram_gb = {"lora": 6.5, "qlora_8bit": 4.0, "qlora_4bit": 2.5}
+    # 라운드당 연산 오버헤드: 양자화된 가중치를 매 스텝 dequant해야 해서
+    # lora < qlora_8bit < qlora_4bit 순으로 느려짐.
+    # Per-round compute overhead: dequantizing weights every step makes
+    # this slower in the order lora < qlora_8bit < qlora_4bit.
+    per_round_latency_sec = {"lora": 45.0, "qlora_8bit": 58.0, "qlora_4bit": 70.0}
     results = []
     for compression in COMPRESSIONS:
         for fl in FLS:
@@ -104,12 +128,16 @@ def make_sample_results() -> List[dict]:
                 rounds = max(3, round(6 + non_iid_amplifier + penalty_scale[compression] * 1.5 + {"lora": 0, "qlora_8bit": 0.4, "qlora_4bit": 0.8}[compression] + rng.uniform(-0.4, 0.4)))
                 rouge = max(0.05, 0.42 - 0.10 * (penalty_scale[compression] * non_iid_amplifier / 3.0) + rng.uniform(-0.01, 0.01))
                 payload_per_round = {"lora": 8_000_000, "qlora_8bit": 8_000_000, "qlora_4bit": 8_000_000}[compression]
+                vram = base_vram_gb[compression] + rng.uniform(-0.1, 0.1)  # alpha와 무관한 잡음만
+                latency = per_round_latency_sec[compression] * rounds + rng.uniform(-20, 20)
                 results.append({
                     "compression": compression, "fl": fl, "alpha": alpha,
                     "val_perplexity": round(ppl, 4),
                     "rouge_l": round(rouge, 4),
                     "total_communication_bytes": payload_per_round * rounds * 8,
                     "rounds_run": rounds,
+                    "peak_vram_gb": round(vram, 3),
+                    "total_latency_sec": round(max(latency, 1.0), 1),
                 })
     return results
 
@@ -191,14 +219,17 @@ def write_summary_table(results: List[dict], is_sample: bool):
     path = os.path.join(FIG_DIR, "summary_table.md")
     with open(path, "w") as f:
         f.write("# 18조합 결과 요약" + (" (SAMPLE DATA)" if is_sample else "") + "\n\n")
-        f.write("| compression | fl | alpha | val_perplexity | rouge_l | rounds_run | total_communication_bytes |\n")
-        f.write("|---|---|---|---|---|---|---|\n")
+        f.write("| compression | fl | alpha | val_perplexity | rouge_l | rounds_run | total_communication_bytes | peak_vram_gb | total_latency_sec |\n")
+        f.write("|---|---|---|---|---|---|---|---|---|\n")
         for compression in COMPRESSIONS:
             for fl in FLS:
                 for alpha in ALPHAS:
                     r = next(x for x in results if x["compression"] == compression and x["fl"] == fl and x["alpha"] == alpha)
+                    vram = r.get("peak_vram_gb")
+                    vram_str = f"{vram:.3f}" if vram is not None else "N/A"
                     f.write(f"| {compression} | {fl} | {alpha} | {r['val_perplexity']:.4f} | "
-                            f"{r['rouge_l']:.4f} | {r['rounds_run']} | {r['total_communication_bytes']:,} |\n")
+                            f"{r['rouge_l']:.4f} | {r['rounds_run']} | {r['total_communication_bytes']:,} | "
+                            f"{vram_str} | {r['total_latency_sec']:.1f} |\n")
     print(f"summary table -> {path}")
 
 
@@ -220,9 +251,14 @@ def main():
                       "ROUGE-L by compression level and α (final round only)", "rouge_l_bars.png", is_sample)
     plot_grouped_bar(results, "total_communication_bytes", "Total Communication (bytes, ↓ better)",
                       "Communication cost by compression level and α", "communication_bars.png", is_sample)
+    plot_trend(results, "peak_vram_gb", "Peak VRAM (GB, ↓ better)",
+               "Peak VRAM vs. Dirichlet α, by compression level — expect ~flat lines",
+               "peak_vram_vs_alpha.png", is_sample)
+    plot_trend(results, "total_latency_sec", "Total Training Latency (sec, ↓ better)",
+               "Total latency vs. Dirichlet α, by compression level", "latency_vs_alpha.png", is_sample)
     write_summary_table(results, is_sample)
 
-    print(f"\n4 figures + 1 summary table written to {FIG_DIR}/")
+    print(f"\n6 figures + 1 summary table written to {FIG_DIR}/")
     if is_sample:
         print("실제 GPU 실행 결과가 results/logs/에 쌓이면 이 스크립트를 다시 돌리세요 — 자동으로 진짜 데이터로 교체됩니다.")
         print("(Once real GPU results land in results/logs/, re-run this script — it will automatically switch to the real data.)")

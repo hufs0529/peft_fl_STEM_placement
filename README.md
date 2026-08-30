@@ -85,12 +85,13 @@ dolly15k-fl-peft-v2/
 ├── scripts/
 │   ├── run_dev_pilot.py            # Week 1: 실제 모델 단일 클라이언트 검증
 │   ├── run_experiment.py           # Task 1 core 18조합(3압축x2FLx3α) + Task 2 진단 실행 진입점
-│   └── analyze_interaction.py      # Subtask 1.3/2.2: 압축률x α 상관관계 분석 + 진단 대상 선정
+│   ├── analyze_interaction.py      # Subtask 1.3/2.2/2.3: 압축률x α 상관관계 + 카테고리별 취약도 스크리닝 + 진단 대상 선정
+│   └── plot_results.py             # 18조합 결과를 PPL/ROUGE-L/통신/수렴속도/VRAM/시간 도표+요약표로 시각화
 └── results/
     ├── checkpoints/{run_name}/round_NNN.pt   # 라운드별 체크포인트 (git 추적 제외)
     ├── logs/{run_name}_rounds.jsonl          # 라운드별 전체 지표
     ├── logs/{run_name}_generations.jsonl     # 마지막 생성 라운드의 예측/참조 (Subtask 2.3 입력)
-    └── figures/                              # Week 5 시각화 출력
+    └── figures/                              # plot_results.py 출력 (6도표 + summary_table.md)
 ```
 
 ```
@@ -116,12 +117,13 @@ dolly15k-fl-peft-v2/
 ├── scripts/
 │   ├── run_dev_pilot.py            # Week 1: single-client verification with the real model
 │   ├── run_experiment.py           # entry point for Task 1's core 18 combinations (3 compression x 2 FL x 3 alpha) + Task 2 diagnostics
-│   └── analyze_interaction.py      # Subtask 1.3/2.2: compression x alpha correlation analysis + diagnostic target selection
+│   ├── analyze_interaction.py      # Subtask 1.3/2.2/2.3: compression x alpha correlation + per-category vulnerability screening + diagnostic target selection
+│   └── plot_results.py             # visualizes the 18 combinations as PPL/ROUGE-L/communication/convergence/VRAM/latency figures + a summary table
 └── results/
     ├── checkpoints/{run_name}/round_NNN.pt   # per-round checkpoints (excluded from git tracking)
     ├── logs/{run_name}_rounds.jsonl          # full per-round metrics
     ├── logs/{run_name}_generations.jsonl     # predictions/references from the final generation round (Subtask 2.3 input)
-    └── figures/                              # Week 5 visualisation outputs
+    └── figures/                              # plot_results.py output (6 figures + summary_table.md)
 ```
 
 ---
@@ -155,9 +157,9 @@ Once all 18 have finished:
 python scripts/analyze_interaction.py
 ```
 
-를 실행합니다. 이 스크립트는 세 가지를 계산합니다:
+를 실행합니다. 이 스크립트는 네 가지를 계산합니다:
 
-is run. This script computes three things:
+is run. This script computes four things:
 
 1. **압축률×α 격자** — 18개 조합의 val_perplexity를 (압축, FL, α) 격자로
    출력합니다.
@@ -171,8 +173,16 @@ is run. This script computes three things:
    같은 결론을 가리키는지 교차검증합니다. 이것이 지도교수 피드백("압축률과
    non-IID 강도의 상관관계를 보라")에 대한 직접적인 정량적 답입니다
    (`src/evaluate.py::compute_compression_alpha_trend`).
-3. **Subtask 2.2 대상 선정** — 18조합 중 task performance가 가장 좋았던
+3. **Subtask 2.3 카테고리별 취약도 스크리닝** — `*_generations.jsonl`에서
+   예제별 ROUGE-L을 다시 계산해(`score_generations_by_category`) 카테고리별로
+   묶고, 어떤 태스크 카테고리가 압축×non-IID 상호작용에 특히 취약한지
+   z-score로 스크리닝합니다(`src/evaluate.py::per_category_compression_penalty`).
+4. **Subtask 2.2 대상 선정** — 18조합 중 task performance가 가장 좋았던
    조합을 골라, local_epochs=5 강건성 점검 대상으로 삼습니다.
+
+18개 로그가 갖춰지면 `python scripts/plot_results.py`로 같은 데이터를
+PPL/ROUGE-L/통신/수렴속도/**VRAM/총 학습 시간** 6개 도표 + 요약표로
+시각화할 수 있습니다(`results/figures/`).
 
 1. **Compression×alpha grid** — prints the val_perplexity of all 18
    combinations as a (compression, FL, alpha) grid.
@@ -188,9 +198,20 @@ is run. This script computes three things:
    direction. This is the direct quantitative answer to the advisor's
    feedback ("look at the correlation between compression rate and
    non-IID intensity") (`src/evaluate.py::compute_compression_alpha_trend`).
-3. **Subtask 2.2 target selection** — picks the combination among the 18
+3. **Subtask 2.3 per-category vulnerability screening** — recomputes
+   per-example ROUGE-L from `*_generations.jsonl`
+   (`score_generations_by_category`), groups it by category, and screens
+   (via z-score) which task categories are especially vulnerable to the
+   compression × non-IID interaction
+   (`src/evaluate.py::per_category_compression_penalty`).
+4. **Subtask 2.2 target selection** — picks the combination among the 18
    with the best task performance as the target for the local_epochs=5
    robustness check.
+
+Once all 18 logs exist, `python scripts/plot_results.py` visualizes the
+same data as 6 figures (PPL/ROUGE-L/communication/convergence-speed/
+**VRAM/total training latency**) plus a summary table
+(`results/figures/`).
 
 ### 파일럿으로 num_rounds 상한 역산 (Deriving the num_rounds Ceiling via a Pilot Run)
 
@@ -436,7 +457,13 @@ to pass.
   `vulnerable=True`)를 계산해 "어떤 카테고리가 압축×non-IID 상호작용에
   특히 취약한가"를 스크리닝합니다. 카테고리 수가 적어(Dolly 8종) 엄밀한
   유의성 검정이 아니라 상대적 순위 매기기 용도이며, 표본 크기(`n`)가
-  작은 카테고리는 별도로 표시됩니다.
+  작은 카테고리는 별도로 표시됩니다. `scripts/analyze_interaction.py`가
+  `score_generations_by_category`로 만든 입력을 받아 실제로 호출합니다.
+- `score_generations_by_category`: `*_generations.jsonl`(예측/참조/카테고리)
+  에서 예제별 ROUGE-L을 다시 계산해 카테고리별로 묶는 헬퍼 —
+  `per_category_compression_penalty`가 요구하는
+  `{category: {"rouge_l":.., "n":..}}` 입력을 만듭니다. PPL은 예제별로
+  로깅돼 있지 않아 ROUGE-L만 지원합니다.
 - `select_best_performing_combination`: Subtask 2.2에서 local_epochs=5
   점검 대상을 고릅니다(18조합 전체 대상).
 - `per_category_breakdown`, `total_communication_cost`: Subtask 2.3
@@ -473,6 +500,13 @@ to pass.
   compression × non-IID interaction. With only a handful of categories
   (8 in Dolly), this is relative-ranking screening, not a significance
   test — categories with a small sample size (`n`) are flagged separately.
+  `scripts/analyze_interaction.py` actually calls this, fed by
+  `score_generations_by_category`.
+- `score_generations_by_category`: a helper that recomputes per-example
+  ROUGE-L from `*_generations.jsonl` (predictions/references/categories)
+  and groups it by category, building the `{category: {"rouge_l":..,
+  "n":..}}` input `per_category_compression_penalty` needs. Only supports
+  ROUGE-L, since PPL isn't logged per example.
 - `select_best_performing_combination`: picks the target for the
   local_epochs=5 check in Subtask 2.2 (now scoped over all 18
   combinations).
@@ -532,7 +566,7 @@ pytest tests/ -v
 | `test_checkpointing.py` | 저장 후 재개 시 라운드/상태가 정확히 복원되는지 | Week 3 |
 | `test_metrics.py` | ROUGE-L 계산(동일 문자열/무관한 문자열/평균), trainable parameter 집계, VRAM/latency 계측 컨텍스트 매니저, 응답 생성 | Week 3 |
 | `test_scaffold.py` | control variate 집계 수식이 손으로 계산한 값과 일치하는지(delta_y 평균, 참여율에 따른 global_control 스케일링), 로컬 학습 1스텝이 실제로 파라미터를 갱신하는지 | Week 3 |
-| `test_evaluate.py` | 카테고리별 분해, fairness variance, **압축률×α 상관관계 계산**(페널티 값·음의 상관관계·상수 페널티일 때 0.0·qlora_8bit 비교·ROUGE-L `higher_is_better` 부호), **카테고리별 취약도 스크리닝**(`per_category_compression_penalty`), **최고 성능 조합 선정**, (레거시) 상호작용 효과 계산 | Week 4~6 |
+| `test_evaluate.py` | 카테고리별 분해, fairness variance, **압축률×α 상관관계 계산**(페널티 값·음의 상관관계·상수 페널티일 때 0.0·qlora_8bit 비교·ROUGE-L `higher_is_better` 부호), **카테고리별 취약도 스크리닝**(`per_category_compression_penalty`, `score_generations_by_category`와의 입출력 계약 포함), **최고 성능 조합 선정**, (레거시) 상호작용 효과 계산 | Week 4~6 |
 
 | File | What it verifies | Corresponding week |
 |---|---|---|
@@ -545,7 +579,7 @@ pytest tests/ -v
 | `test_checkpointing.py` | round/state are restored exactly after save-then-resume | Week 3 |
 | `test_metrics.py` | ROUGE-L computation (identical/unrelated strings, averaging), trainable parameter counting, the VRAM/latency measurement context manager, response generation | Week 3 |
 | `test_scaffold.py` | that the control-variate aggregation formulas match hand-computed values (delta_y averaging, global_control scaling by participation rate); that one local training step actually updates parameters | Week 3 |
-| `test_evaluate.py` | per-category breakdown, fairness variance, **compression×alpha correlation** (penalty values, negative correlation, 0.0 for constant penalty, qlora_8bit comparison, ROUGE-L `higher_is_better` sign), **per-category vulnerability screening** (`per_category_compression_penalty`), **selecting the best-performing combination**, (legacy) interaction-effect computation | Week 4-6 |
+| `test_evaluate.py` | per-category breakdown, fairness variance, **compression×alpha correlation** (penalty values, negative correlation, 0.0 for constant penalty, qlora_8bit comparison, ROUGE-L `higher_is_better` sign), **per-category vulnerability screening** (`per_category_compression_penalty`, incl. its input contract with `score_generations_by_category`), **selecting the best-performing combination**, (legacy) interaction-effect computation | Week 4-6 |
 
 ---
 
