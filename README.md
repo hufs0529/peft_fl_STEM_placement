@@ -60,8 +60,10 @@ persist as PEFT quantization (LoRA→QLoRA) becomes more aggressive?
 (LoRA/QLoRA 8bit/QLoRA 4bit) × 2FL(FedAvg/FedProx) × 3 Dirichlet
 α(0.1/1/10) = 18조합**으로 개정했습니다. SCAFFOLD는 core에서
 제외했지만 `src/scaffold.py`와 관련 테스트는 그대로 유지했습니다. 모델도
-Qwen2.5-3B에서 **Qwen2.5-1.5B-Instruct**로 축소했습니다(지도교수 승인,
-GPU 비용 절감). 자세한 배경은 `week4` 브랜치의 "설계 노트" 절 참고.
+Qwen2.5-3B에서 Qwen2.5-1.5B를 거쳐 **Qwen2.5-0.5B-Instruct**로
+재축소했습니다(GPU 시간/비용 추가 절감 — 0.5B는 1.5B와 달리 Qwen2.5
+라인업에 실제로 존재하는 크기). 자세한 배경은 `week4` 브랜치의
+"설계 노트" 절 참고.
 
 Following advisor feedback that "this project's focus should be the
 correlation between compression rate and non-IID intensity," the core
@@ -69,9 +71,11 @@ design was revised from 3 FL × 2 PEFT (6 combinations) to **3
 compression levels (LoRA/QLoRA-8bit/QLoRA-4bit) × 2 FL algorithms
 (FedAvg/FedProx) × 3 Dirichlet alphas (0.1/1/10) = 18 combinations**.
 SCAFFOLD is dropped from the core design, though `src/scaffold.py` and
-its tests are kept as-is. The model was also downsized from Qwen2.5-3B to
-**Qwen2.5-1.5B-Instruct** (advisor-approved, to cut GPU cost). See the
-"Design Note" section on the `week4` branch for the full background.
+its tests are kept as-is. The model was also downsized further, from
+Qwen2.5-3B through Qwen2.5-1.5B to **Qwen2.5-0.5B-Instruct** (to cut GPU
+time/cost even more -- unlike 1.5B, 0.5B is an exact size that actually
+exists in the Qwen2.5 lineup). See the "Design Note" section on the
+`week4` branch for the full background.
 
 ### `tests/test_evaluate.py` 확장 (Extended)
 - `compute_compression_alpha_trend`(새 핵심 산출물) 테스트 3개: 페널티 값이

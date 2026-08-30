@@ -29,13 +29,21 @@
 # --peft --fl --alpha --qlora-bits --local-epochs arguments of
 # scripts/run_experiment.py override the defaults below.
 
-# name: 3B에서 1B급으로 축소(지도교수 피드백) — Qwen 계열 유지를 위해
-# Qwen2.5 라인업 중 1B에 가장 가까운 1.5B-Instruct 사용
-# name: downsized from 3B to a ~1B-class model (advisor feedback) — kept
-# within the Qwen family by using Qwen2.5-1.5B-Instruct, the closest
-# available size to 1B in the Qwen2.5 lineup
+# name: 3B → 1.5B(1B급)를 거쳐 0.5B로 추가 축소 — GPU 시간/비용을 더
+# 줄이기 위함. Qwen2.5 라인업에 0.5B가 실제로 존재해(1.5B처럼 "가장
+# 가까운 근사치"가 아니라) 정확한 크기로 맞출 수 있음. 동일 계열(Qwen2
+# 아키텍처)이라 q_proj/v_proj 구조가 그대로 유지되므로 src/models.py의
+# LoraConfig(target_modules=["q_proj","v_proj"])는 코드 변경 없이 그대로
+# 맞물린다.
+# name: downsized further, from 3B -> 1.5B (~1B-class) -> 0.5B, to cut
+# GPU time/cost even more. Qwen2.5 actually ships a 0.5B checkpoint (unlike
+# 1.5B, which was only the "closest available" approximation), so this
+# hits the target size exactly. Same family (Qwen2 architecture), so the
+# q_proj/v_proj structure is unchanged and src/models.py's
+# LoraConfig(target_modules=["q_proj","v_proj"]) lines up with no code
+# changes.
 model:
-  name: "Qwen/Qwen2.5-1.5B-Instruct"
+  name: "Qwen/Qwen2.5-0.5B-Instruct"
 
 data:
   # subset_size: null = use the entire Dolly-15k
