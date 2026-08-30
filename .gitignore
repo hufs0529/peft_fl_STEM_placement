@@ -10,3 +10,4 @@ venv/
 wandb/
 .env
 .claude/
+reports/
