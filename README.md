@@ -68,7 +68,7 @@ dolly15k-fl-peft-v2/
 ├── requirements.txt
 ├── configs/
 │   ├── dev_config.yaml           # Week 1~3 검증용 (gpt2, 2클라이언트, 2라운드)
-│   └── experiment_config.yaml    # Week 4 본실험용 (Qwen2.5-1.5B, 8클라이언트, 10라운드; Week 5 개정)
+│   └── experiment_config.yaml    # Week 4 본실험용 (Qwen2.5-0.5B, 8클라이언트, 10라운드; Week 5 개정)
 ├── src/                          # dev/experiment 공용 핵심 로직
 │   ├── models.py                   # LoRA/QLoRA(4bit·8bit, core), DoRA(미사용 진단 대조군) 래핑
 │   ├── data.py                     # Dolly-15k 로딩, 토크나이징, held-out 스플릿
@@ -100,7 +100,7 @@ dolly15k-fl-peft-v2/
 ├── requirements.txt
 ├── configs/
 │   ├── dev_config.yaml           # for Week 1-3 verification (gpt2, 2 clients, 2 rounds)
-│   └── experiment_config.yaml    # for the Week 4 main experiment (Qwen2.5-1.5B, 8 clients, 10 rounds; revised in Week 5)
+│   └── experiment_config.yaml    # for the Week 4 main experiment (Qwen2.5-0.5B, 8 clients, 10 rounds; revised in Week 5)
 ├── src/                          # core logic shared by dev/experiment
 │   ├── models.py                   # wraps LoRA/QLoRA (4-bit/8-bit, core) and DoRA (unused diagnostic control)
 │   ├── data.py                     # Dolly-15k loading, tokenisation, held-out split
@@ -589,10 +589,15 @@ pytest tests/ -v
   미니어처 검증 위주라 기본 구독만으로 충분합니다.
 - **Week 4 (본 실험)**: 예약형/스팟 단일 GPU 인스턴스(AWS g5.xlarge 또는
   Lambda Labs A100) — `src/checkpointing.py`가 매 라운드 저장하므로 스팟
-  인스턴스가 회수되어도 안전하게 재개할 수 있습니다. (Week 5 갱신: 모델을
-  Qwen2.5-1.5B로 축소하면서 g5.xlarge 스팟 기준 core 18회+진단 1회
-  총 19회 실행이 약 105~143 GPU-hr, 비용 약 $35~84로 추정됩니다 —
-  `week4` 브랜치 설계 노트 참고.)
+  인스턴스가 회수되어도 안전하게 재개할 수 있습니다. Colab 유료 플랜(Pro/
+  Pro+)은 본 실험 규모(아래)에는 예산이 맞지 않아 권장하지 않습니다 —
+  Colab Pro+도 월 컴퓨팅 유닛이 A100 기준 35~40시간 상당인데 반해 필요한
+  총 시간은 이보다 많습니다. (Week 5 갱신: 모델을 Qwen2.5-1.5B를 거쳐
+  Qwen2.5-0.5B로 재축소하면서, g5.xlarge 스팟 기준 core 18회+진단 1회
+  총 19회 실행이 약 35~48 GPU-hr, 비용 약 $12~28로 추정됩니다(1.5B
+  기준 105~143 GPU-hr·$35~84에서 파라미터 비율로 선형 축소한 근사치이며,
+  정확한 값은 파일럿 실행으로 재확인 예정) — `week4` 브랜치 설계 노트
+  참고.)
 
 - **Week 1-3 (development/debugging)**: Google Colab Pro — the base
   subscription is enough since the work is mostly miniature verification
@@ -600,10 +605,15 @@ pytest tests/ -v
 - **Week 4 (main experiment)**: an on-demand or spot single-GPU instance
   (AWS g5.xlarge or Lambda Labs A100) — since `src/checkpointing.py` saves
   every round, it is safe to resume even if the spot instance is
-  reclaimed. (Week 5 update: after downsizing the model to Qwen2.5-1.5B,
-  the core 18 runs plus 1 diagnostic run — 19 total — are estimated at
-  roughly 105-143 GPU-hr on a g5.xlarge spot instance, costing roughly
-  $35-84 — see the design note on the `week4` branch.)
+  reclaimed. Paid Colab tiers (Pro/Pro+) are not recommended for the main
+  experiment's scale (below) — even Colab Pro+'s monthly compute-unit
+  budget is roughly 35-40 hours of A100 time, less than what's needed.
+  (Week 5 update: after downsizing the model further, from Qwen2.5-1.5B to
+  Qwen2.5-0.5B, the core 18 runs plus 1 diagnostic run — 19 total — are
+  estimated at roughly 35-48 GPU-hr on a g5.xlarge spot instance, costing
+  roughly $12-28 (a linear-scaling approximation from the 1.5B figure of
+  105-143 GPU-hr / $35-84, to be re-confirmed with a pilot run) — see the
+  design note on the `week4` branch.)
 
 ```bash
 pip install -r requirements.txt
@@ -621,9 +631,11 @@ pip install -r requirements.txt
   non-IID 상관관계가 동일하게 나타나는지는 이번 스코프에서 답하지
   못합니다. 또한 SCAFFOLD 자체는 여전히 **Option II의 간소화 근사
   구현**입니다.
-- 모델을 **Qwen2.5-3B → Qwen2.5-1.5B-Instruct로 축소**했습니다(지도교수
-  승인, GPU 비용 절감 목적) — 더 큰 모델에서도 같은 상관관계 패턴이
-  유지되는지는 검증하지 못했습니다.
+- 모델을 **Qwen2.5-3B → Qwen2.5-1.5B → Qwen2.5-0.5B-Instruct로 재축소**
+  했습니다(GPU 시간/비용 추가 절감 목적) — 더 큰 모델에서도 같은
+  상관관계 패턴이 유지되는지는 검증하지 못했으며, 0.5B는 3B/1.5B보다
+  표현력이 낮아 압축×non-IID 상호작용 자체가 더 약하게(혹은 다르게)
+  나타날 위험도 있습니다.
 - 각 조합은 **1회씩만 실행**됩니다(반복/시드 없음) — 시간 제약상 불가피한 한계.
 - Held-out 평가셋은 **전역 공유 방식**이라 클라이언트별 분포 편향을 완전히
   반영하지 못합니다. 이 때문에 클라이언트별 fairness variance는 (모든
@@ -653,9 +665,12 @@ pip install -r requirements.txt
   compression×non-IID correlation holds under a more sophisticated
   correction algorithm like SCAFFOLD is not answered within this scope.
   SCAFFOLD itself also remains a **simplified Option II approximation**.
-- The model was **downsized from Qwen2.5-3B to Qwen2.5-1.5B-Instruct**
-  (advisor-approved, to cut GPU cost) — whether the same correlation
-  pattern holds on a larger model was not verified.
+- The model was **downsized further, from Qwen2.5-3B through Qwen2.5-1.5B
+  to Qwen2.5-0.5B-Instruct** (to cut GPU time/cost even more) — whether
+  the same correlation pattern holds on a larger model was not verified,
+  and 0.5B's lower representational capacity than 3B/1.5B carries some
+  risk that the compression x non-IID interaction itself appears weaker
+  or different at this scale.
 - Each combination is **run only once** (no repeats/seeds) — an
   unavoidable limitation given the time constraints.
 - The held-out evaluation set is **shared globally**, so it does not fully
