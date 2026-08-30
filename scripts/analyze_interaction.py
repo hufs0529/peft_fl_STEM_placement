@@ -7,7 +7,11 @@
   2) 압축 페널티(4bit/8bit 각각 - 무압축)가 alpha가 작아질수록(non-IID가
      강해질수록) 커지는지 Pearson 상관계수로 확인, PPL/ROUGE-L(높을수록
      좋음, higher_is_better=True) 둘 다 (src/evaluate.py::compute_compression_alpha_trend)
-  3) Subtask 2.2: local_epochs=5 강건성 점검에 쓸 "18조합 중 성능이 가장
+  3) 카테고리별 압축×non-IID 취약도 스크리닝(Subtask 2.3) — 어떤 태스크
+     카테고리가 압축×non-IID 상호작용에 특히 취약한지 z-score로 확인
+     (src/evaluate.py::per_category_compression_penalty,
+     `*_generations.jsonl`에서 예제별 ROUGE-L을 다시 계산)
+  4) Subtask 2.2: local_epochs=5 강건성 점검에 쓸 "18조합 중 성능이 가장
      좋은 조합" 결정
 
 SCAFFOLD/DoRA는 이 18조합 스코프에서 빠졌습니다 — scaffold.py 자체는
@@ -33,7 +37,12 @@ values (0.1/1/10) to:
      decreases (non-IID intensity increases), for both PPL and ROUGE-L
      (higher-is-better, higher_is_better=True)
      (src/evaluate.py::compute_compression_alpha_trend),
-  3) Subtask 2.2: pick "the best-performing combination among the 18" to
+  3) per-category compression x non-IID vulnerability screening
+     (Subtask 2.3) — which task categories are especially vulnerable to
+     the interaction, via a z-score
+     (src/evaluate.py::per_category_compression_penalty, recomputing
+     per-example ROUGE-L from `*_generations.jsonl`),
+  4) Subtask 2.2: pick "the best-performing combination among the 18" to
      use for the local_epochs=5 robustness check.
 
 SCAFFOLD/DoRA are out of scope for these 18 combinations — scaffold.py
@@ -53,7 +62,12 @@ from typing import List, Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from src.evaluate import compute_compression_alpha_trend, select_best_performing_combination
+from src.evaluate import (
+    compute_compression_alpha_trend,
+    per_category_compression_penalty,
+    score_generations_by_category,
+    select_best_performing_combination,
+)
 
 COMPRESSIONS = ["lora", "qlora_8bit", "qlora_4bit"]
 FLS = ["fedavg", "fedprox"]
@@ -93,6 +107,22 @@ def load_run_summary(compression: str, fl: str, alpha: float) -> Optional[dict]:
         "total_communication_bytes": total_comm,
         "rounds_run": len(lines),
     }
+
+
+def load_run_per_category(compression: str, fl: str, alpha: float) -> Optional[dict]:
+    """`{run_name}_generations.jsonl`에서 카테고리별 ROUGE-L을 계산한다.
+    파일이 없으면(예: 그 run이 rouge_l을 하나도 못 만들었으면) None.
+
+    Computes per-category ROUGE-L from `{run_name}_generations.jsonl`.
+    Returns None if the file doesn't exist (e.g. that run produced no
+    rouge_l at all)."""
+    run_name = build_run_name(compression, fl, alpha)
+    path = f"results/logs/{run_name}_generations.jsonl"
+    if not os.path.exists(path):
+        return None
+    with open(path) as f:
+        generations = [json.loads(line) for line in f]
+    return score_generations_by_category(generations)
 
 
 def main():
@@ -153,6 +183,31 @@ def main():
     for fl, t in conv_trend.items():
         print(f"  {fl}: alpha={t['alphas']}  압축_페널티(4bit-무압축)={[round(p, 4) for p in t['compression_penalty']]}")
         print(f"       alpha-페널티 상관계수 = {t['alpha_penalty_correlation']:+.4f}")
+
+    print("\n=== 카테고리별 압축×non-IID 취약도 스크리닝 (ROUGE-L 기준, Subtask 2.3) ===")
+    per_category_runs = []
+    missing_gen = []
+    for compression in COMPRESSIONS:
+        for fl in FLS:
+            for alpha in ALPHAS:
+                per_cat = load_run_per_category(compression, fl, alpha)
+                if per_cat is None:
+                    missing_gen.append(build_run_name(compression, fl, alpha))
+                    continue
+                per_category_runs.append({"compression": compression, "fl": fl, "alpha": alpha, "per_category": per_cat})
+
+    if len(per_category_runs) < len(COMPRESSIONS) * len(FLS) * len(ALPHAS):
+        print(f"  ({len(per_category_runs)}/18개 generations.jsonl만 존재 — 건너뜀: {missing_gen})")
+    else:
+        for compression in ("qlora_4bit", "qlora_8bit"):
+            penalty = per_category_compression_penalty(
+                per_category_runs, compression=compression, metric="rouge_l", higher_is_better=True,
+            )
+            print(f"-- {compression} vs lora (z-score 내림차순, z>1이면 취약) --")
+            for cat, stats in sorted(penalty.items(), key=lambda kv: -kv[1]["z_score"]):
+                flag = "  <== 취약" if stats["vulnerable"] else ""
+                print(f"  {cat:20s} mean_relative_penalty={stats['mean_relative_penalty']:+.4f}  "
+                      f"z={stats['z_score']:+.2f}{flag}")
 
     best = select_best_performing_combination(run_results, performance_field="val_perplexity")
     print(f"\n>>> Subtask 2.2: local_epochs=5 강건성 점검 대상 = {best['run_name']} <<<")

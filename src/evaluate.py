@@ -24,6 +24,10 @@
 - per_category_compression_penalty: 위 상관관계 분석을 카테고리 단위로
   쪼갠 버전 — 어떤 태스크 카테고리가 압축×non-IID 상호작용에 특히
   취약한지 z-score로 스크리닝한다.
+- score_generations_by_category: `*_generations.jsonl`(예측/참조/카테고리)
+  에서 예제별 ROUGE-L을 계산해 카테고리별로 묶는다 —
+  per_category_compression_penalty의 "per_category" 입력을 만드는 헬퍼
+  (scripts/analyze_interaction.py 참고).
 
 Analysis functions computed from data that is already logged, at no extra
 GPU cost.
@@ -59,6 +63,10 @@ GPU cost.
 - per_category_compression_penalty: the same correlation analysis broken
   down per task category — screens (via z-score) which categories are
   especially vulnerable to the compression x non-IID interaction.
+- score_generations_by_category: computes per-example ROUGE-L from
+  `*_generations.jsonl` (predictions/references/categories) and groups it
+  by category — the helper that builds per_category_compression_penalty's
+  "per_category" input (see scripts/analyze_interaction.py).
 """
 
 from collections import defaultdict
@@ -83,6 +91,33 @@ def per_category_breakdown(per_example_results: List[dict]) -> Dict[str, dict]:
             "n": len(items),
         }
         for cat, items in grouped.items()
+    }
+
+
+def score_generations_by_category(generations: List[dict]) -> Dict[str, dict]:
+    """`{instruction, reference, prediction, category}` 리스트
+    (`results/logs/{run_name}_generations.jsonl` 포맷)에서 예제별 ROUGE-L을
+    계산해 카테고리별로 묶는다 — `per_category_compression_penalty()`에 넣을
+    "per_category" 입력을 만드는 용도. PPL은 예제별로 로깅돼 있지 않아
+    포함하지 않는다(ROUGE-L만 지원).
+
+    Computes per-example ROUGE-L from a list of
+    `{instruction, reference, prediction, category}` dicts (the
+    `results/logs/{run_name}_generations.jsonl` format) and groups them by
+    category — builds the "per_category" input for
+    `per_category_compression_penalty()`. PPL isn't logged per example, so
+    this only supports ROUGE-L.
+    """
+    from src.metrics import compute_rouge_l
+
+    grouped = defaultdict(list)
+    for g in generations:
+        score = compute_rouge_l([g["prediction"]], [g["reference"]])
+        grouped[g["category"]].append(score)
+
+    return {
+        cat: {"rouge_l": sum(scores) / len(scores), "n": len(scores)}
+        for cat, scores in grouped.items()
     }
 
 

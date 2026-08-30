@@ -82,7 +82,9 @@ generation evaluation.
   지표는 `higher_is_better=True`로 부호 반전 없이 그대로 쓸 수 있다.
 - `per_category_compression_penalty`: 위 상관관계를 카테고리 단위로 쪼개
   어떤 태스크 카테고리가 압축×non-IID 상호작용에 특히 취약한지 z-score로
-  스크리닝
+  스크리닝. `score_generations_by_category`(`*_generations.jsonl`에서
+  예제별 ROUGE-L을 다시 계산)로 만든 입력을 받아
+  `scripts/analyze_interaction.py`가 실제로 호출함
 - `select_best_performing_combination`: Subtask 2.2 local_epochs=5 대상 선정
   (18조합 전체 대상으로 확장)
 - `per_category_breakdown` / `client_fairness_variance` / `total_communication_cost`:
@@ -102,7 +104,10 @@ generation evaluation.
   `higher_is_better=True`.
 - `per_category_compression_penalty`: breaks the above correlation down
   per task category, via a z-score, to screen which categories are
-  especially vulnerable to the compression x non-IID interaction
+  especially vulnerable to the compression x non-IID interaction.
+  `scripts/analyze_interaction.py` actually calls it, fed by
+  `score_generations_by_category` (recomputes per-example ROUGE-L from
+  `*_generations.jsonl`)
 - `select_best_performing_combination`: selects the target for Subtask 2.2
   local_epochs=5 (now scoped over all 18 combinations)
 - `per_category_breakdown` / `client_fairness_variance` / `total_communication_cost`:
@@ -149,8 +154,10 @@ python scripts/run_experiment.py --peft qlora --qlora-bits 4 --fl fedavg --alpha
 ```
 
 ### 4. 결과 분석 스크립트 (`scripts/analyze_interaction.py`) (Result Analysis Script)
-18개 실행 로그를 읽어 압축률×α 격자와 상관계수를 출력하고, Task 2 진단
-실행에 쓸 조합을 자동으로 알려줌:
+18개 실행 로그를 읽어 압축률×α 격자와 상관계수를 출력하고, **카테고리별
+압축×non-IID 취약도 스크리닝**(`*_generations.jsonl` → `score_generations_by_category`
+→ `per_category_compression_penalty`)까지 자동으로 수행한 뒤, Task 2 진단
+실행에 쓸 조합을 알려줌:
 ```bash
 python scripts/analyze_interaction.py
 # === 18조합 격자 (val_perplexity, 낮을수록 좋음) ===
@@ -160,9 +167,11 @@ python scripts/analyze_interaction.py
 ```
 
 Reads the logs of the 18 runs, prints the compression×alpha grid and
-correlation, and automatically reports the combination to use for the
-Task 2 diagnostic run (see the code block above for invocation and
-sample output).
+correlation, runs the **per-category compression×non-IID vulnerability
+screening** (`*_generations.jsonl` → `score_generations_by_category` →
+`per_category_compression_penalty`), and automatically reports the
+combination to use for the Task 2 diagnostic run (see the code block
+above for invocation and sample output).
 
 ### 설계 노트: 지도교수 피드백에 따른 설계 개정 (Design Note: Redesign Following Advisor Feedback)
 Week 4 시점에는 원래 core 6조합(3FL×2PEFT) + Task 2 진단 2개(DoRA,
