@@ -170,18 +170,23 @@ no need to rerun it — it's reused as-is for the core results. This dev
 environment has no GPU (`torch.cuda.is_available() == False`), so the
 pilot itself needs to run on an actual GPU instance.
 
-### Subtask 2.3 분석은 코드가 아니라 실행 시점의 작업 (Subtask 2.3 Analysis Is a Runtime Task, Not Code)
-카테고리별 성능 분해(`per_category_breakdown`)는 추가 코드 없이,
-`results/logs/*_rounds.jsonl`에 이미 기록된 데이터에서 바로 계산됩니다 —
-실제 GPU 실행(Week 4 스크립트)이 끝난 뒤 노트북/스크립트에서 이 함수들을
-직접 호출하는 방식이라, 실행 결과가 나오기 전까지는 추가로 커밋할 코드가
-없습니다.
+### Subtask 2.3 카테고리별 취약도 스크리닝 — 이제 실행부까지 배선됨 (Subtask 2.3 Per-Category Vulnerability Screening — Now Wired Up)
+`per_category_compression_penalty`는 만들어만 두고 호출부가 없어서 실제
+데이터를 넣어본 적이 없었습니다. `score_generations_by_category`(신규 —
+`*_generations.jsonl`에서 예제별 ROUGE-L을 다시 계산해 카테고리별로 묶음)를
+추가하고 `scripts/analyze_interaction.py`의 `main()`에 실제로 연결해서,
+18개 로그가 갖춰지면 자동으로 카테고리별 취약도(z-score) 스크리닝까지
+출력하도록 했습니다. 가짜 18조합 로그로 end-to-end 검증까지 마쳤습니다
+(의도적으로 취약하게 설계한 카테고리가 정확히 플래그됨).
 
-Per-category performance breakdown (`per_category_breakdown`) is computed
-directly from data already logged in `results/logs/*_rounds.jsonl`,
-without any additional code — these functions are called directly from a
-notebook/script after the actual GPU run (Week 4 scripts) finishes, so
-there is no additional code to commit until run results are available.
+`per_category_compression_penalty` was written but had no caller — it was
+never actually fed real data. Added `score_generations_by_category`
+(new — recomputes per-example ROUGE-L from `*_generations.jsonl` and
+groups it by category) and wired it into
+`scripts/analyze_interaction.py`'s `main()`, so once all 18 logs exist the
+per-category vulnerability (z-score) screening prints automatically.
+Verified end-to-end against synthetic 18-combination logs (a
+deliberately-designed vulnerable category was correctly flagged).
 
 ---
 
@@ -192,18 +197,20 @@ pip install -r requirements.txt
 pytest tests/ -v
 ```
 
-**테스트 결과**: **61 passed, 2 skipped**(QLoRA 4bit/8bit, GPU 필요) — 전체 스위트.
+**테스트 결과**: **63 passed, 2 skipped**(QLoRA 4bit/8bit, GPU 필요) — 전체 스위트.
 `test_data.py`/`test_metrics.py`/`test_scaffold.py`가 추가돼(그동안 어떤
 테스트에서도 직접 호출되지 않던 `src/data.py`·`src/metrics.py`·
 `src/scaffold.py` 함수들의 커버리지 공백을 메꿈), `fl_runner.py`가 그동안
 버리고 있던 `peak_vram_gb`/`total_latency_sec` 로깅도 고쳤습니다.
+`score_generations_by_category` 테스트 2개도 추가됐습니다(위 참고).
 
-**Test results**: **61 passed, 2 skipped** (QLoRA 4-bit/8-bit, requires GPU) — full suite.
+**Test results**: **63 passed, 2 skipped** (QLoRA 4-bit/8-bit, requires GPU) — full suite.
 Added `test_data.py`/`test_metrics.py`/`test_scaffold.py` (closing a
 coverage gap for `src/data.py`/`src/metrics.py`/`src/scaffold.py`
 functions that no test had ever called directly), and fixed
 `fl_runner.py`, which was discarding `peak_vram_gb`/`total_latency_sec`
-instead of logging them.
+instead of logging them. Also added 2 tests for
+`score_generations_by_category` (see above).
 
 ---
 

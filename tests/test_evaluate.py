@@ -10,6 +10,7 @@ from src.evaluate import (
     compute_interaction_effects,
     per_category_breakdown,
     per_category_compression_penalty,
+    score_generations_by_category,
     select_best_performing_combination,
     select_largest_interaction_fl_algorithm,
     total_communication_cost,
@@ -277,3 +278,42 @@ def test_per_category_compression_penalty_reports_sample_size():
     runs = _make_category_runs()
     result = per_category_compression_penalty(runs, compression="qlora_4bit", metric="rouge_l", higher_is_better=True)
     assert result["creative_writing"]["n"]["fedavg_a0.1"] == 20
+
+
+# ── score_generations_by_category: generations.jsonl -> per_category 입력 ──
+# ── score_generations_by_category: generations.jsonl -> per_category input ──
+
+def test_score_generations_by_category_averages_per_category():
+    generations = [
+        {"prediction": "The cat sat on the mat", "reference": "The cat sat on the mat", "category": "open_qa"},
+        {"prediction": "completely unrelated text", "reference": "totally different sentence", "category": "open_qa"},
+        {"prediction": "exact match", "reference": "exact match", "category": "closed_qa"},
+    ]
+    result = score_generations_by_category(generations)
+
+    assert result["closed_qa"]["n"] == 1
+    assert result["closed_qa"]["rouge_l"] > 0.99
+    assert result["open_qa"]["n"] == 2
+    # 완전일치 1개 + 무관한 1개의 평균이라 0과 1 사이 중간값이어야 함
+    assert 0.0 < result["open_qa"]["rouge_l"] < 1.0
+
+
+def test_score_generations_by_category_output_feeds_per_category_compression_penalty():
+    """score_generations_by_category의 출력 shape가 per_category_compression_penalty가
+    기대하는 {category: {"rouge_l":.., "n":..}} 형태와 실제로 맞물리는지 확인
+    (두 함수가 항상 같이 쓰이므로 계약이 안 맞으면 즉시 깨져야 함).
+
+    Confirms score_generations_by_category's output shape actually matches
+    what per_category_compression_penalty expects
+    ({category: {"rouge_l":.., "n":..}}) — since the two are always used
+    together, a contract mismatch should fail immediately."""
+    lora_gen = [{"prediction": "a", "reference": "a", "category": "open_qa"}]
+    qlora_gen = [{"prediction": "totally unrelated", "reference": "a", "category": "open_qa"}]
+
+    runs = [
+        {"fl": "fedavg", "alpha": 0.1, "compression": "lora", "per_category": score_generations_by_category(lora_gen)},
+        {"fl": "fedavg", "alpha": 0.1, "compression": "qlora_4bit", "per_category": score_generations_by_category(qlora_gen)},
+    ]
+    result = per_category_compression_penalty(runs, compression="qlora_4bit", metric="rouge_l", higher_is_better=True)
+    assert "open_qa" in result
+    assert result["open_qa"]["mean_relative_penalty"] > 0
