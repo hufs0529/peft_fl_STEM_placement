@@ -3,33 +3,32 @@ test on server, not individual clients") 반영.
 
 fl_runner.py(서버 루프)가 이 모듈의 함수를 직접 호출해 글로벌 모델을
 평가한다 — Flower의 NumPyClient.evaluate() 인터페이스를 거치지 않는다.
-클라이언트 객체(clients[0])의 모델을 재사용하는 건 이미 로드돼 있는
-모델을 아끼기 위한 메모리 절약 디테일일 뿐, "클라이언트가 스스로를
-평가"하는 것과는 다르다 — 실제로 평가를 수행하는 주체(호출부)는 서버
-루프이고, 대상은 그 라운드의 fit() 결과를 집계(aggregate)한 뒤의
-global_state다.
+평가에는 어떤 클라이언트 객체에도 속하지 않는 서버 전용 모델 인스턴스
+(fl_runner.py의 server_model)를 쓴다 — "클라이언트가 스스로를 평가"하는
+것과는 구조적으로 분리돼 있다. 대상은 그 라운드의 fit() 결과를
+집계(aggregate)한 뒤의 global_state다.
 
 집계 직후 모든 클라이언트가 동일한 global 파라미터와 동일한 공유
 held-out set을 갖게 되므로, 이 held-out을 몇 번 평가하든 결과는
 동일하다(부동소수점 오차 제외) — 그래서 서버는 이 평가를 (global
-파라미터가 로드된) 모델 인스턴스 하나로 딱 1번만 수행한다.
+파라미터가 로드된) 서버 모델 인스턴스 하나로 딱 1번만 수행한다.
 
 Server-side global-model evaluation — reflects advisor feedback
 ("evaluation is based on the test on server, not individual clients").
 
 fl_runner.py (the server loop) calls this module's functions directly to
 evaluate the global model — it does not go through Flower's
-NumPyClient.evaluate() interface. Reusing a client object's already-loaded
-model (clients[0].model) is purely a memory-saving detail, not "a client
-evaluating itself" — the caller (the server loop) is what actually
-performs the evaluation, and the target is global_state after that
-round's fit() results have been aggregated.
+NumPyClient.evaluate() interface. Evaluation uses a dedicated
+server-only model instance (fl_runner.py's server_model) that belongs to
+no client — structurally separate from "a client evaluating itself." The
+target is global_state after that round's fit() results have been
+aggregated.
 
 Right after aggregation, every client holds identical global parameters
 and sees the identical shared held-out set, so evaluating this held-out
 set any number of times gives the same result (aside from floating-point
 error) — hence the server performs this evaluation exactly once, using
-one model instance loaded with the global parameters.
+its own model instance loaded with the global parameters.
 """
 
 from typing import Dict, Tuple
