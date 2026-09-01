@@ -188,20 +188,43 @@ but never logged. What changed:
   excluded from the core compression × non-IID analysis, so it was
   deliberately left uninstrumented.
 
-### 설계 노트: 왜 PPL을 클라이언트 1개로만 재는가
-집계 직후 8개 클라이언트는 전부 **동일한 global 파라미터**로 덮어써지고
-**동일한 공용 held-out set**을 봅니다 — 같은 모델+같은 데이터로 8번
-순전파해도 결과는 항상 같습니다(부동소수점 오차 제외). 그래서 대표
-클라이언트 1개만 평가하고, 나머지 7번의 중복 계산은 하지 않습니다.
-(반대로 `fit()`은 클라이언트마다 로컬 데이터가 달라 8번 다 필요합니다.)
+### 설계 노트: 평가는 서버가 직접 한다 (지도교수 피드백 반영)
+지도교수님 피드백("evaluation is based on the test on server, not
+individual clients")을 반영해, PPL/ROUGE-L 평가는 `src/server_eval.py`의
+순수 함수를 **서버 루프(`fl_runner.py`)가 직접 호출**해서 수행합니다 —
+Flower의 `NumPyClient.evaluate()`(클라이언트 쪽 인터페이스)는 거치지
+않습니다. `FlowerClient.evaluate()`는 Flower 인터페이스 호환성을 위해
+남아있지만 내부적으로 같은 `server_eval` 함수를 재사용할 뿐, 실제
+프로덕션 경로(`fl_runner.py`)는 이 메서드를 호출하지 않습니다.
 
-### Design note: why is PPL measured with only one client?
-Right after aggregation, all 8 clients are overwritten with the **same
-global parameters** and see the **same shared held-out set** — running the
-same model on the same data 8 times always gives the same result (aside from
-floating-point error). So only one representative client is evaluated, and
-the other 7 duplicate computations are skipped. (Conversely, `fit()` needs
-all 8, since each client has different local data.)
+`clients[0].model`을 재사용하는 이유는 순전히 메모리 절약입니다(모델을
+또 하나 로드할 필요가 없음) — 평가 시점엔 client 0의 로컬 학습 결과가
+아니라 그 라운드 `fit()` 결과를 **집계(aggregate)한 `global_state`**가
+로드돼 있습니다. 집계 직후 8개 클라이언트는 전부 동일한 global
+파라미터로 덮어써지고 동일한 공용 held-out set을 보므로, 같은 모델+같은
+데이터로 8번 순전파해도 결과는 항상 같습니다(부동소수점 오차 제외) —
+그래서 서버는 이 held-out을 딱 1번만 평가합니다. (반대로 `fit()`은
+클라이언트마다 로컬 데이터가 달라 8번 다 필요합니다.)
+
+### Design note: evaluation is performed by the server directly (per advisor feedback)
+Reflecting advisor feedback ("evaluation is based on the test on server,
+not individual clients"), PPL/ROUGE-L evaluation is performed by having
+the **server loop (`fl_runner.py`) call `src/server_eval.py`'s pure
+functions directly** — it does not go through Flower's
+`NumPyClient.evaluate()` (a client-side interface). `FlowerClient.evaluate()`
+is kept only for Flower-interface compatibility and internally reuses the
+same `server_eval` functions, but the actual production path
+(`fl_runner.py`) never calls that method.
+
+Reusing `clients[0].model` is purely a memory-saving detail (avoids
+loading another model instance) — at evaluation time it holds
+`global_state`, i.e. that round's `fit()` results **after aggregation**,
+not client 0's local training result. Right after aggregation, all 8
+clients are overwritten with the same global parameters and see the same
+shared held-out set — running the same model on the same data 8 times
+always gives the same result (aside from floating-point error). So the
+server evaluates this held-out set exactly once. (Conversely, `fit()`
+needs all 8, since each client has different local data.)
 
 ---
 
@@ -211,16 +234,18 @@ all 8, since each client has different local data.)
 pytest tests/test_convergence.py tests/test_checkpointing.py tests/test_fl_integration.py -v
 ```
 
-**테스트 결과**: `pytest tests/ -m "not network"` 기준 45 passed, 2 skipped(QLoRA
+**테스트 결과**: `pytest tests/ -m "not network"` 기준 47 passed, 2 skipped(QLoRA
 4bit/8bit, GPU 필요) — Week 1~3 테스트 전체 통과. `test_data.py`(라벨 마스킹 등
 `src/data.py` 유닛테스트), `test_metrics.py`(ROUGE-L/trainable params/VRAM
-계측), `test_scaffold.py`(control variate 집계 수식 검증)가 추가돼, 그동안
-어떤 테스트에서도 직접 호출되지 않던 함수들의 커버리지 공백을 메꿨습니다.
+계측), `test_scaffold.py`(control variate 집계 수식 검증), `test_server_eval.py`
+(서버 측 평가 함수 검증)가 추가돼, 그동안 어떤 테스트에서도 직접 호출되지
+않던 함수들의 커버리지 공백을 메꿨습니다.
 
-**Test results**: 45 passed, 2 skipped (QLoRA 4-bit/8-bit, requires GPU),
+**Test results**: 47 passed, 2 skipped (QLoRA 4-bit/8-bit, requires GPU),
 based on `pytest tests/ -m "not network"` — all Week 1–3 tests pass.
 `test_data.py` (unit tests for `src/data.py`, incl. label masking),
-`test_metrics.py` (ROUGE-L/trainable params/VRAM measurement), and
+`test_metrics.py` (ROUGE-L/trainable params/VRAM measurement),
+`test_server_eval.py` (verifying the server-side evaluation functions), and
 `test_scaffold.py` (verifying the control-variate aggregation formulas)
 were added, closing a coverage gap for functions that no test had ever
 called directly.
