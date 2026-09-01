@@ -197,14 +197,18 @@ Flower의 `NumPyClient.evaluate()`(클라이언트 쪽 인터페이스)는 거�
 남아있지만 내부적으로 같은 `server_eval` 함수를 재사용할 뿐, 실제
 프로덕션 경로(`fl_runner.py`)는 이 메서드를 호출하지 않습니다.
 
-`clients[0].model`을 재사용하는 이유는 순전히 메모리 절약입니다(모델을
-또 하나 로드할 필요가 없음) — 평가 시점엔 client 0의 로컬 학습 결과가
-아니라 그 라운드 `fit()` 결과를 **집계(aggregate)한 `global_state`**가
-로드돼 있습니다. 집계 직후 8개 클라이언트는 전부 동일한 global
-파라미터로 덮어써지고 동일한 공용 held-out set을 보므로, 같은 모델+같은
-데이터로 8번 순전파해도 결과는 항상 같습니다(부동소수점 오차 제외) —
-그래서 서버는 이 held-out을 딱 1번만 평가합니다. (반대로 `fit()`은
-클라이언트마다 로컬 데이터가 달라 8번 다 필요합니다.)
+평가엔 `clients[0].model`을 빌려 쓰지 않고, **어떤 클라이언트에도 속하지
+않는 서버 전용 모델 인스턴스(`server_model`)**를 `run_federated_training()`
+안에서 별도로 만들어 씁니다 — 8개 클라이언트가 각자 자기 모델을 GPU에
+들고 있는 것과 별개로, 서버도 자기 모델을 하나 더 들고 있는 구조입니다
+(로컬 시뮬레이션이라 결국 같은 프로세스/GPU를 쓰지만, 모델 인스턴스는
+8+1=9개가 됩니다). 평가 시점엔 `server_model`에 그 라운드 `fit()` 결과를
+**집계(aggregate)한 `global_state`**가 로드돼 있습니다. 집계 직후 8개
+클라이언트는 전부 동일한 global 파라미터로 덮어써지고 동일한 공용
+held-out set을 보므로, 같은 모델+같은 데이터로 8번 순전파해도 결과는
+항상 같습니다(부동소수점 오차 제외) — 그래서 서버는 이 held-out을 딱
+1번만 평가합니다. (반대로 `fit()`은 클라이언트마다 로컬 데이터가 달라
+8번 다 필요합니다.)
 
 ### Design note: evaluation is performed by the server directly (per advisor feedback)
 Reflecting advisor feedback ("evaluation is based on the test on server,
@@ -216,14 +220,17 @@ is kept only for Flower-interface compatibility and internally reuses the
 same `server_eval` functions, but the actual production path
 (`fl_runner.py`) never calls that method.
 
-Reusing `clients[0].model` is purely a memory-saving detail (avoids
-loading another model instance) — at evaluation time it holds
-`global_state`, i.e. that round's `fit()` results **after aggregation**,
-not client 0's local training result. Right after aggregation, all 8
-clients are overwritten with the same global parameters and see the same
-shared held-out set — running the same model on the same data 8 times
-always gives the same result (aside from floating-point error). So the
-server evaluates this held-out set exactly once. (Conversely, `fit()`
+Evaluation no longer borrows `clients[0].model` — `run_federated_training()`
+creates a **dedicated server-only model instance (`server_model`)**,
+belonging to no client. The 8 clients each already hold their own model on
+the GPU; the server now holds one more of its own (still a local
+simulation sharing the same process/GPU, but 8+1=9 model instances now
+coexist). At evaluation time, `server_model` holds `global_state`, i.e.
+that round's `fit()` results **after aggregation**. Right after
+aggregation, all 8 clients are overwritten with the same global parameters
+and see the same shared held-out set — running the same model on the same
+data 8 times always gives the same result (aside from floating-point
+error). So the server evaluates this held-out set exactly once. (Conversely, `fit()`
 needs all 8, since each client has different local data.)
 
 ---
