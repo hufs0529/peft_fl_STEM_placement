@@ -389,9 +389,12 @@ to pass.
   `evaluate_global_model`/`evaluate_global_model_generation` — 모델과
   데이터셋만 받는 순수 함수 — 을 서버 루프가 직접 호출합니다. Flower의
   `NumPyClient.evaluate()`(클라이언트 쪽 인터페이스)는 거치지 않습니다.
-  `clients[0].model`을 재사용하는 건 이미 로드된 모델을 아끼는 메모리
-  절약 디테일일 뿐이고, 평가 시점엔 client 0의 로컬 학습 결과가 아니라
-  그 라운드 `fit()` 결과를 집계한 `global_state`가 로드돼 있습니다. 매
+  평가엔 `clients[0].model`을 빌려 쓰지 않고 **어떤 클라이언트에도
+  속하지 않는 서버 전용 모델 인스턴스(`server_model`)**를 따로 만들어
+  씁니다 — 로컬 시뮬레이션이라 결국 같은 프로세스/GPU를 쓰지만(모델
+  인스턴스 8+1=9개 공존), 코드상 "client 0이 평가한다"로 읽힐 여지를
+  없앴습니다. 평가 시점엔 `server_model`에 그 라운드 `fit()` 결과를
+  집계한 `global_state`가 로드돼 있습니다. 매
   라운드 집계 직후 모든 클라이언트는 동일한 global 파라미터로 덮어써지고
   동일한 공용 held-out set을 보므로, 몇 번을 평가하든 결과가 같습니다 —
   그래서 서버는 이 held-out을 딱 1번만 평가합니다(8번 평가해도 결과가
@@ -427,10 +430,14 @@ to pass.
   `src/server_eval.py`'s `evaluate_global_model`/
   `evaluate_global_model_generation` — plain functions taking only a model
   and a dataset — directly, rather than going through Flower's
-  `NumPyClient.evaluate()` (a client-side interface). Reusing
-  `clients[0].model` is purely a memory-saving detail; at evaluation time
-  it holds `global_state` (that round's aggregated `fit()` results), not
-  client 0's local training result. Right after aggregation, every client
+  `NumPyClient.evaluate()` (a client-side interface). Evaluation no
+  longer borrows `clients[0].model` — a **dedicated server-only model
+  instance (`server_model`)**, belonging to no client, is created
+  separately. This is still a local simulation sharing the same
+  process/GPU (8+1=9 model instances coexist), but the code no longer
+  reads as "client 0 is doing the evaluating." At evaluation time,
+  `server_model` holds `global_state` (that round's aggregated `fit()`
+  results). Right after aggregation, every client
   is overwritten with the same global parameters and sees the same shared
   held-out set, so evaluating it any number of times gives the same result
   — hence the server evaluates this held-out set exactly once (evaluating
@@ -583,7 +590,7 @@ pytest tests/ -v
 | `test_roundtrip.py` | FL 파라미터 송수신 시 값/순서 보존 | Week 2 |
 | `test_partitioning.py` | 최소 카테고리 임계값 리샘플링, α가 작을수록 실제로 더 비IID한지 | Week 2 |
 | `test_data.py` | 프롬프트 포맷, **라벨 마스킹**(-100이 prompt 구간만 정확히 덮는지), held-out 카테고리 균등 분할, ROUGE-L용 카테고리 층화 샘플링, 클라이언트 DataLoader 구성 (`load_raw_dolly15k`만 네트워크 마커) | Week 2 |
-| `test_fl_integration.py` | FedAvg/FedProx/SCAFFOLD 세 경로 모두 전체 루프 통과, SCAFFOLD의 `local_control` 라운드 간 유지, FedProx fit() 정상 동작, **`peak_vram_gb`/`total_latency_sec` 집계** | Week 3 |
+| `test_fl_integration.py` | FedAvg/FedProx/SCAFFOLD 세 경로 모두 전체 루프 통과, SCAFFOLD의 `local_control` 라운드 간 유지, FedProx fit() 정상 동작, **`peak_vram_gb`/`total_latency_sec` 집계**, **이미 `num_rounds`에 도달한 체크포인트를 재개하면 크래시 대신 명확한 `RuntimeError`** | Week 3 |
 | `test_convergence.py` | 3라운드 연속 <1% 개선 시 실제로 멈추는지, 큰 폭 개선 중에는 안 멈추는지 | Week 3 |
 | `test_checkpointing.py` | 저장 후 재개 시 라운드/상태가 정확히 복원되는지 | Week 3 |
 | `test_metrics.py` | ROUGE-L 계산(동일 문자열/무관한 문자열/평균), trainable parameter 집계, VRAM/latency 계측 컨텍스트 매니저, 응답 생성 | Week 3 |
@@ -597,7 +604,7 @@ pytest tests/ -v
 | `test_roundtrip.py` | value/order preservation when FL parameters are sent and received | Week 2 |
 | `test_partitioning.py` | minimum-category-threshold resampling; that a smaller α actually produces a more non-IID split | Week 2 |
 | `test_data.py` | prompt formatting, **label masking** (that -100 covers exactly the prompt span), even category split for the held-out set, category-stratified sampling for ROUGE-L, client DataLoader construction (only `load_raw_dolly15k` is network-marked) | Week 2 |
-| `test_fl_integration.py` | all three of FedAvg/FedProx/SCAFFOLD complete the full loop; SCAFFOLD's `local_control` is preserved across rounds; FedProx's `fit()` runs correctly; **`peak_vram_gb`/`total_latency_sec` aggregation** | Week 3 |
+| `test_fl_integration.py` | all three of FedAvg/FedProx/SCAFFOLD complete the full loop; SCAFFOLD's `local_control` is preserved across rounds; FedProx's `fit()` runs correctly; **`peak_vram_gb`/`total_latency_sec` aggregation**; **resuming a checkpoint already at `num_rounds` raises a clear `RuntimeError` instead of crashing** | Week 3 |
 | `test_convergence.py` | actually stops after 3 consecutive rounds of <1% improvement; does not stop while improvements are large | Week 3 |
 | `test_checkpointing.py` | round/state are restored exactly after save-then-resume | Week 3 |
 | `test_metrics.py` | ROUGE-L computation (identical/unrelated strings, averaging), trainable parameter counting, the VRAM/latency measurement context manager, response generation | Week 3 |
