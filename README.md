@@ -234,9 +234,9 @@ pytest tests/ -v   # Week 1~3 테스트 전부, evaluate.py 관련 테스트는 
 python -c "import scripts.run_experiment, scripts.analyze_interaction"  # import 검증
 ```
 
-**테스트 결과**: 47 passed, 2 skipped (QLoRA 4bit/8bit, GPU 필요 — `test_evaluate.py`는 Week 5에 추가). 그동안 어떤 테스트에서도 직접 호출되지 않던 `src/data.py`(라벨 마스킹 등), `src/metrics.py`(ROUGE-L/VRAM 계측), `src/scaffold.py`(control variate 집계 수식) 커버리지를 `test_data.py`/`test_metrics.py`/`test_scaffold.py`로 메꿨고, `fl_runner.py`가 그동안 버리고 있던 `peak_vram_gb`/`total_latency_sec`를 `round_record`/최종 결과에 로깅하도록 고쳤습니다(`compute_compression_alpha_trend`의 메모리 축 분석에 필요). 또한 지도교수 피드백("evaluate on server, not individual clients")을 반영해 PPL/ROUGE-L 평가를 `NumPyClient.evaluate()`가 아니라 서버가 `src/server_eval.py`를 직접 호출하는 구조로 바꿨고(`test_server_eval.py` 추가), 한 걸음 더 나아가 평가에 `clients[0].model`을 재사용하는 대신 **어떤 클라이언트에도 속하지 않는 서버 전용 모델 인스턴스(`server_model`)**를 따로 만들어 쓰도록 했습니다 — 로컬 시뮬레이션이라 결국 같은 GPU/프로세스를 쓰지만, 코드상 "클라이언트 0이 평가한다"로 읽힐 여지를 아예 없앴습니다.
+**테스트 결과**: 48 passed, 2 skipped (QLoRA 4bit/8bit, GPU 필요 — `test_evaluate.py`는 Week 5에 추가). 그동안 어떤 테스트에서도 직접 호출되지 않던 `src/data.py`(라벨 마스킹 등), `src/metrics.py`(ROUGE-L/VRAM 계측), `src/scaffold.py`(control variate 집계 수식) 커버리지를 `test_data.py`/`test_metrics.py`/`test_scaffold.py`로 메꿨고, `fl_runner.py`가 그동안 버리고 있던 `peak_vram_gb`/`total_latency_sec`를 `round_record`/최종 결과에 로깅하도록 고쳤습니다(`compute_compression_alpha_trend`의 메모리 축 분석에 필요). 또한 지도교수 피드백("evaluate on server, not individual clients")을 반영해 PPL/ROUGE-L 평가를 `NumPyClient.evaluate()`가 아니라 서버가 `src/server_eval.py`를 직접 호출하는 구조로 바꿨고(`test_server_eval.py` 추가), 한 걸음 더 나아가 평가에 `clients[0].model`을 재사용하는 대신 **어떤 클라이언트에도 속하지 않는 서버 전용 모델 인스턴스(`server_model`)**를 따로 만들어 쓰도록 했습니다 — 로컬 시뮬레이션이라 결국 같은 GPU/프로세스를 쓰지만, 코드상 "클라이언트 0이 평가한다"로 읽힐 여지를 아예 없앴습니다. 추가로 체크포인트가 이미 `num_rounds`까지 진행된 상태에서 재개하면 빈 `round_records`로 인해 `IndexError`가 나던 버그를 발견해 명확한 `RuntimeError`로 바꾸고 회귀 테스트를 추가했습니다.
 
-**Test results**: 47 passed, 2 skipped (QLoRA 4-bit/8-bit, requires GPU —
+**Test results**: 48 passed, 2 skipped (QLoRA 4-bit/8-bit, requires GPU —
 `test_evaluate.py` will be added in Week 5). Closed a coverage gap for
 `src/data.py` (label masking, etc.), `src/metrics.py` (ROUGE-L/VRAM
 measurement), and `src/scaffold.py` (control-variate aggregation formulas)
@@ -252,7 +252,10 @@ further, evaluation no longer reuses `clients[0].model` — it now uses a
 **dedicated server-only model instance (`server_model`)** that belongs to
 no client. Since this is still a local simulation sharing the same
 GPU/process, the underlying hardware usage is unchanged, but the code no
-longer reads as "client 0 is doing the evaluating."
+longer reads as "client 0 is doing the evaluating." Also found and fixed
+a bug where resuming a checkpoint that had already reached `num_rounds`
+crashed with an `IndexError` from an empty `round_records` list — now
+raises a clear `RuntimeError` instead, with a regression test added.
 
 ---
 
