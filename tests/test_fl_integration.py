@@ -11,6 +11,7 @@ FedAvg/FedProx/SCAFFOLD — run through fl_runner.py's full loop
 
 import shutil
 
+import pytest
 import torch
 import yaml
 from torch.utils.data import DataLoader, Dataset
@@ -184,3 +185,27 @@ def test_total_latency_sec_matches_sum_of_round_latencies():
     expected = sum(r["round_latency_sec"] for r in result["round_records"])
     assert result["total_latency_sec"] == expected
     shutil.rmtree("results/checkpoints/test_fedavg_latency_dummy", ignore_errors=True)
+
+
+def test_resuming_a_checkpoint_already_at_num_rounds_raises_clear_error():
+    """체크포인트가 이미 num_rounds까지 도달한 상태로 재개하면 라운드
+    루프가 0번 돌아 round_records가 비게 되고, 그 뒤 round_records[-1]
+    접근에서 IndexError가 나던 버그를 회귀 방지한다 — 이제는 크래시
+    대신 원인이 분명한 RuntimeError를 낸다.
+
+    Regression test for a bug where resuming a checkpoint that already
+    reached num_rounds made the round loop execute zero times, leaving
+    round_records empty and crashing with an IndexError on
+    round_records[-1] — now raises a clear RuntimeError instead."""
+    config = make_dev_config("fedavg")
+    config["federated"]["num_rounds"] = 1
+    run_name = "test_fedavg_already_done_dummy"
+
+    clients = _make_clients(config)
+    run_federated_training(config, clients, run_name=run_name)  # round 1까지 완료, 체크포인트 생성
+
+    clients_again = _make_clients(config)
+    with pytest.raises(RuntimeError, match="num_rounds"):
+        run_federated_training(config, clients_again, run_name=run_name)  # 이미 round 1 완료 상태에서 재개 시도
+
+    shutil.rmtree(f"results/checkpoints/{run_name}", ignore_errors=True)
