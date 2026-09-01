@@ -187,9 +187,11 @@ local_epochs=5) 총 8회 실행을 계획했으나, Week 5에 지도교수로부
 - 모델을 Qwen2.5-3B → Qwen2.5-1.5B를 거쳐 **Qwen2.5-0.5B-Instruct**로
   재축소(GPU 시간/비용 추가 절감 목적) — Qwen 계열 유지, 0.5B는 1.5B와
   달리 "가장 가까운 근사치"가 아니라 라인업에 실제로 존재하는 크기
-- `fl_client.py`/`fl_runner.py`(Week 3)에서 이미 PPL은 대표 클라이언트
-  1개만, ROUGE-L은 마지막 라운드 1회+카테고리 층화 샘플만 계산하도록
-  만들어뒀기 때문에, 1.5B 모델 기준 1회당 약 5.5~7.5 GPU-hr로 추정했었고,
+- `fl_runner.py`(Week 3)에서 이미 PPL은 서버가 직접 1회만, ROUGE-L도
+  마지막 라운드에 서버가 직접 1회+카테고리 층화 샘플만 계산하도록
+  만들어뒀기 때문에(지도교수 피드백: evaluate on server, not individual
+  clients — `src/server_eval.py`), 1.5B 모델 기준 1회당 약 5.5~7.5
+  GPU-hr로 추정했었고,
   0.5B는 연산량이 파라미터 수에 대략 비례한다는 근사(1.5B의 1/3)로
   1회당 약 **1.8~2.5 GPU-hr** — 18회 + Task 2 진단 1개(local_epochs=5)
   총 19회 실행을 g5.xlarge 스팟 기준 약 **35~48 GPU-hr, 비용 약
@@ -211,10 +213,11 @@ non-IID intensity," so the core design was revised as follows:
   **Qwen2.5-0.5B-Instruct** (to cut GPU time/cost further) — staying
   within the Qwen family; unlike 1.5B, 0.5B is an exact size in the
   lineup, not just the closest approximation
-- Since `fl_client.py`/`fl_runner.py` (Week 3) already compute PPL over
-  only one representative client and ROUGE-L only once at the last round
-  over a category-stratified sample, each run was previously estimated at
-  roughly 5.5-7.5 GPU-hr on the 1.5B model; scaling that down by roughly
+- Since `fl_runner.py` (Week 3) already computes PPL once, directly on the
+  server, and ROUGE-L once at the last round (also server-side) over a
+  category-stratified sample (advisor feedback: evaluate on server, not
+  individual clients — `src/server_eval.py`), each run was previously
+  estimated at roughly 5.5-7.5 GPU-hr on the 1.5B model; scaling that down by roughly
   the parameter-count ratio (1.5B -> 0.5B, about 1/3) gives roughly
   **1.8-2.5 GPU-hr per run on 0.5B** — we plan for the 18 runs plus 1 Task
   2 diagnostic run (local_epochs=5), 19 runs total, to take roughly
@@ -231,9 +234,9 @@ pytest tests/ -v   # Week 1~3 테스트 전부, evaluate.py 관련 테스트는 
 python -c "import scripts.run_experiment, scripts.analyze_interaction"  # import 검증
 ```
 
-**테스트 결과**: 45 passed, 2 skipped (QLoRA 4bit/8bit, GPU 필요 — `test_evaluate.py`는 Week 5에 추가). 그동안 어떤 테스트에서도 직접 호출되지 않던 `src/data.py`(라벨 마스킹 등), `src/metrics.py`(ROUGE-L/VRAM 계측), `src/scaffold.py`(control variate 집계 수식) 커버리지를 `test_data.py`/`test_metrics.py`/`test_scaffold.py`로 메꿨고, `fl_runner.py`가 그동안 버리고 있던 `peak_vram_gb`/`total_latency_sec`를 `round_record`/최종 결과에 로깅하도록 고쳤습니다(`compute_compression_alpha_trend`의 메모리 축 분석에 필요).
+**테스트 결과**: 47 passed, 2 skipped (QLoRA 4bit/8bit, GPU 필요 — `test_evaluate.py`는 Week 5에 추가). 그동안 어떤 테스트에서도 직접 호출되지 않던 `src/data.py`(라벨 마스킹 등), `src/metrics.py`(ROUGE-L/VRAM 계측), `src/scaffold.py`(control variate 집계 수식) 커버리지를 `test_data.py`/`test_metrics.py`/`test_scaffold.py`로 메꿨고, `fl_runner.py`가 그동안 버리고 있던 `peak_vram_gb`/`total_latency_sec`를 `round_record`/최종 결과에 로깅하도록 고쳤습니다(`compute_compression_alpha_trend`의 메모리 축 분석에 필요). 또한 지도교수 피드백("evaluate on server, not individual clients")을 반영해 PPL/ROUGE-L 평가를 `NumPyClient.evaluate()`가 아니라 서버가 `src/server_eval.py`를 직접 호출하는 구조로 바꿨습니다(`test_server_eval.py` 추가).
 
-**Test results**: 45 passed, 2 skipped (QLoRA 4-bit/8-bit, requires GPU —
+**Test results**: 47 passed, 2 skipped (QLoRA 4-bit/8-bit, requires GPU —
 `test_evaluate.py` will be added in Week 5). Closed a coverage gap for
 `src/data.py` (label masking, etc.), `src/metrics.py` (ROUGE-L/VRAM
 measurement), and `src/scaffold.py` (control-variate aggregation formulas)
@@ -241,7 +244,10 @@ measurement), and `src/scaffold.py` (control-variate aggregation formulas)
 `test_metrics.py`/`test_scaffold.py`. Also fixed `fl_runner.py`, which was
 discarding `peak_vram_gb`/`total_latency_sec` instead of logging them into
 `round_record`/the final result (needed for the memory axis of
-`compute_compression_alpha_trend`).
+`compute_compression_alpha_trend`). Additionally, per advisor feedback
+("evaluate on server, not individual clients"), PPL/ROUGE-L evaluation now
+goes through the server calling `src/server_eval.py` directly rather than
+`NumPyClient.evaluate()` (`test_server_eval.py` added).
 
 ---
 
