@@ -155,6 +155,14 @@ def run_federated_training(
     )
     convergence.history = extra.get("val_loss_history", [])
 
+    if start_round >= num_rounds:
+        raise RuntimeError(
+            f"[{run_name}] 재개할 체크포인트가 이미 round {start_round}까지 진행됐는데 "
+            f"num_rounds={num_rounds}이라 더 돌 라운드가 없습니다 — 이 run은 이미 끝났거나 "
+            f"num_rounds를 더 늘려야 합니다. (재개 소스: "
+            f"{checkpoint_base_dir}/{run_name}/round_{start_round:03d}.pt)"
+        )
+
     payload_bytes_per_round = compute_payload_bytes(global_state)
     round_records = []
     converged_round = None

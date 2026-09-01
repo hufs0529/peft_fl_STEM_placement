@@ -204,10 +204,12 @@ PPL/ROUGE-L 평가를 `clients[0].evaluate()` — Flower의 `NumPyClient`
 (`evaluate_global_model`, `evaluate_global_model_generation`)를 추가하고,
 `fl_runner.py`가 이걸 직접 호출하도록 바꿨습니다. `FlowerClient.evaluate()`는
 Flower 인터페이스 호환성을 위해 남겨뒀지만 내부적으로 같은 함수를 재사용할
-뿐, 실제 서버 루프는 더 이상 이 메서드를 호출하지 않습니다.
-`clients[0].model`을 재사용하는 건 여전히 순수 메모리 절약 디테일이고,
-평가 시점엔 client 0의 로컬 학습 결과가 아니라 그 라운드 `fit()` 결과를
-집계한 `global_state`가 로드돼 있습니다. `tests/test_server_eval.py`로
+뿐, 실제 서버 루프는 더 이상 이 메서드를 호출하지 않습니다. 한 걸음 더
+나아가, 평가에 `clients[0].model`을 재사용하는 대신 **어떤 클라이언트에도
+속하지 않는 서버 전용 모델 인스턴스(`server_model`)**를
+`run_federated_training()` 안에서 따로 만들어 씁니다 — 로컬 시뮬레이션이라
+결국 같은 프로세스/GPU를 쓰지만(모델 인스턴스가 8+1=9개 공존), 코드상
+"client 0이 평가한다"로 읽힐 여지를 없앴습니다. `tests/test_server_eval.py`로
 직접 단위 테스트를 추가했습니다.
 
 Reflects advisor feedback ("evaluation is based on the test on server,
@@ -223,11 +225,13 @@ Added `src/server_eval.py` (new), with plain functions
 only a model and a dataset, and changed `fl_runner.py` to call them
 directly. `FlowerClient.evaluate()` is kept for Flower-interface
 compatibility but now just delegates to the same functions internally —
-the actual server loop no longer calls that method. Reusing
-`clients[0].model` remains a pure memory-saving detail: at evaluation time
-it holds `global_state` (that round's aggregated `fit()` results), not
-client 0's local training result. Added direct unit tests in
-`tests/test_server_eval.py`.
+the actual server loop no longer calls that method. Taken a step further,
+evaluation no longer reuses `clients[0].model` — `run_federated_training()`
+now creates a **dedicated server-only model instance (`server_model`)**
+that belongs to no client. This is still a local simulation sharing the
+same process/GPU (8+1=9 model instances now coexist), but the code no
+longer reads as "client 0 is doing the evaluating." Added direct unit
+tests in `tests/test_server_eval.py`.
 
 ---
 
