@@ -192,6 +192,43 @@ per-category vulnerability (z-score) screening prints automatically.
 Verified end-to-end against synthetic 18-combination logs (a
 deliberately-designed vulnerable category was correctly flagged).
 
+### 평가는 서버가 직접 한다 (지도교수 피드백 반영) (Evaluation Is Now Performed by the Server Directly, per Advisor Feedback)
+지도교수님 피드백("evaluation is based on the test on server, not
+individual clients")을 반영했습니다. 이전엔 `fl_runner.py`(서버 루프)가
+PPL/ROUGE-L 평가를 `clients[0].evaluate()` — Flower의 `NumPyClient`
+인터페이스(클라이언트 쪽 메서드) — 를 통해 수행했습니다. 데이터 자체가
+전역 공유 held-out이라 결과값은 서버 평가와 동일하지만, 코드 구조상으로는
+"클라이언트가 자기 자신을 평가"하는 모양이었습니다.
+
+`src/server_eval.py`(신규)에 모델과 데이터셋만 받는 순수 함수
+(`evaluate_global_model`, `evaluate_global_model_generation`)를 추가하고,
+`fl_runner.py`가 이걸 직접 호출하도록 바꿨습니다. `FlowerClient.evaluate()`는
+Flower 인터페이스 호환성을 위해 남겨뒀지만 내부적으로 같은 함수를 재사용할
+뿐, 실제 서버 루프는 더 이상 이 메서드를 호출하지 않습니다.
+`clients[0].model`을 재사용하는 건 여전히 순수 메모리 절약 디테일이고,
+평가 시점엔 client 0의 로컬 학습 결과가 아니라 그 라운드 `fit()` 결과를
+집계한 `global_state`가 로드돼 있습니다. `tests/test_server_eval.py`로
+직접 단위 테스트를 추가했습니다.
+
+Reflects advisor feedback ("evaluation is based on the test on server,
+not individual clients"). Previously, `fl_runner.py` (the server loop)
+performed PPL/ROUGE-L evaluation via `clients[0].evaluate()` — Flower's
+`NumPyClient` interface (a client-side method). Since the data itself is
+the globally-shared held-out set, the result was numerically identical to
+a true server-side evaluation, but architecturally it read as "a client
+evaluating itself."
+
+Added `src/server_eval.py` (new), with plain functions
+(`evaluate_global_model`, `evaluate_global_model_generation`) that take
+only a model and a dataset, and changed `fl_runner.py` to call them
+directly. `FlowerClient.evaluate()` is kept for Flower-interface
+compatibility but now just delegates to the same functions internally —
+the actual server loop no longer calls that method. Reusing
+`clients[0].model` remains a pure memory-saving detail: at evaluation time
+it holds `global_state` (that round's aggregated `fit()` results), not
+client 0's local training result. Added direct unit tests in
+`tests/test_server_eval.py`.
+
 ---
 
 ## 실행 방법 (How to Run)
@@ -201,20 +238,22 @@ pip install -r requirements.txt
 pytest tests/ -v
 ```
 
-**테스트 결과**: **63 passed, 2 skipped**(QLoRA 4bit/8bit, GPU 필요) — 전체 스위트.
+**테스트 결과**: **65 passed, 2 skipped**(QLoRA 4bit/8bit, GPU 필요) — 전체 스위트.
 `test_data.py`/`test_metrics.py`/`test_scaffold.py`가 추가돼(그동안 어떤
 테스트에서도 직접 호출되지 않던 `src/data.py`·`src/metrics.py`·
 `src/scaffold.py` 함수들의 커버리지 공백을 메꿈), `fl_runner.py`가 그동안
 버리고 있던 `peak_vram_gb`/`total_latency_sec` 로깅도 고쳤습니다.
-`score_generations_by_category` 테스트 2개도 추가됐습니다(위 참고).
+`score_generations_by_category` 테스트 2개, 서버 측 평가 함수 테스트
+(`test_server_eval.py`) 2개도 추가됐습니다(위 참고).
 
-**Test results**: **63 passed, 2 skipped** (QLoRA 4-bit/8-bit, requires GPU) — full suite.
+**Test results**: **65 passed, 2 skipped** (QLoRA 4-bit/8-bit, requires GPU) — full suite.
 Added `test_data.py`/`test_metrics.py`/`test_scaffold.py` (closing a
 coverage gap for `src/data.py`/`src/metrics.py`/`src/scaffold.py`
 functions that no test had ever called directly), and fixed
 `fl_runner.py`, which was discarding `peak_vram_gb`/`total_latency_sec`
 instead of logging them. Also added 2 tests for
-`score_generations_by_category` (see above).
+`score_generations_by_category`, and 2 for the server-side evaluation
+functions (`test_server_eval.py`, see above).
 
 ---
 
