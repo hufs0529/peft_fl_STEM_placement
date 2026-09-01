@@ -76,6 +76,7 @@ dolly15k-fl-peft-v2/
 │   ├── communication.py            # FL 파라미터 왕복 + payload 크기 계산
 │   ├── fl_client.py                # 공통 클라이언트 (FedProx proximal term, warmup, VRAM/latency, ROUGE-L)
 │   ├── fl_runner.py                # 수동 라운드 루프 — 수렴기준/체크포인트/로깅/W&B 전부 배선
+│   ├── server_eval.py              # 서버 측 글로벌 모델 평가(PPL/ROUGE-L) — NumPyClient.evaluate() 미사용
 │   ├── scaffold.py                 # SCAFFOLD 실제 구현 (control variate) — core에서는 제외, 코드/테스트만 유지
 │   ├── convergence.py              # 3라운드 연속 <1% 개선 시 조기종료
 │   ├── checkpointing.py            # 라운드별 저장/재개
@@ -108,6 +109,7 @@ dolly15k-fl-peft-v2/
 │   ├── communication.py            # FL parameter round-trip + payload size computation
 │   ├── fl_client.py                # shared client (FedProx proximal term, warmup, VRAM/latency, ROUGE-L)
 │   ├── fl_runner.py                # manual round loop — wires up convergence, checkpointing, logging, W&B
+│   ├── server_eval.py              # server-side global-model evaluation (PPL/ROUGE-L) — bypasses NumPyClient.evaluate()
 │   ├── scaffold.py                 # actual SCAFFOLD implementation (control variate) — dropped from core, code/tests kept
 │   ├── convergence.py              # early stop on 3 consecutive rounds of <1% improvement
 │   ├── checkpointing.py            # per-round save/resume
@@ -357,10 +359,12 @@ to pass.
   (`is_fedprox` 분기, μ=0.01).
 - 첫 라운드(`server_round==1`)에만 linear warmup이 적용됩니다.
 - `track_vram_and_latency()`로 감싸서 Peak VRAM/Training Latency를 자동 측정합니다.
-- `evaluate()`는 매 라운드 PPL(teacher-forcing 순전파)만 계산하고, ROUGE-L
-  (자기회귀 생성이 필요해 훨씬 비쌈)은 `run_generation_metrics=True`일
-  때만 별도의 `rouge_eval_dataset`(카테고리 층화 샘플)에 대해 계산합니다
-  — 언제 이 플래그가 켜지는지는 `fl_runner.py`가 결정합니다(아래).
+- `evaluate()`는 Flower의 `NumPyClient` 인터페이스를 만족시키기 위해
+  남아있을 뿐, 실제 서버 루프(`fl_runner.py`)는 지도교수 피드백
+  ("evaluation is based on the test on server, not individual clients")에
+  따라 이 메서드를 호출하지 않고 `src/server_eval.py`의 순수 함수를
+  직접 호출합니다 — `evaluate()`는 내부적으로 그 함수들을 재사용할 뿐
+  로직이 중복되지는 않습니다(아래 `fl_runner.py` 절 참고).
 
 ### `src/fl_client.py` — Subtask 1.1, 1.2
 - The `(mu/2)*||local-global||^2` proximal term is added to the loss only
@@ -368,23 +372,32 @@ to pass.
 - Linear warmup is applied only in the first round (`server_round==1`).
 - Wrapped in `track_vram_and_latency()` to automatically measure Peak
   VRAM/Training Latency.
-- `evaluate()` computes only PPL (a teacher-forcing forward pass) every
-  round; ROUGE-L (which needs much more expensive autoregressive
-  generation) is computed only when `run_generation_metrics=True`, against
-  a separate `rouge_eval_dataset` (a category-stratified sample) — when
-  this flag gets turned on is decided by `fl_runner.py` (below).
+- `evaluate()` is kept only to satisfy Flower's `NumPyClient` interface —
+  per advisor feedback ("evaluation is based on the test on server, not
+  individual clients"), the actual server loop (`fl_runner.py`) never
+  calls it, calling `src/server_eval.py`'s pure functions directly
+  instead. `evaluate()` internally reuses those same functions, so there's
+  no duplicated logic (see the `fl_runner.py` section below).
 
 ### `src/fl_runner.py` — Subtask 1.2, 2.3
 - **수렴 기준**: `ConvergenceTracker`가 매 라운드 검증 loss를 받아 3라운드 연속
   1% 미만 개선이면 루프를 멈춥니다(≤10라운드).
 - **체크포인트**: 매 라운드 저장, 실행 시작 시 자동으로 마지막 체크포인트에서
   재개(`resume_or_start_fresh`) — 세션이 끊겨도 안전합니다.
-- **평가 비용 통제**: 매 라운드 집계 직후 모든 클라이언트는 동일한 global
-  파라미터로 덮어써지고 동일한 공용 held-out set을 보므로, 대표 클라이언트
-  (`clients[0]`) 1개만 평가합니다 — 8명을 전부 평가해도 결과가 같아
-  나머지는 순수 중복 계산이기 때문입니다. ROUGE-L(생성 필요)은 매 라운드가
-  아니라 **루프 종료 후 최종 global 파라미터로 딱 1회만**, 카테고리 층화
-  샘플(`config['data']['rouge_l_sample_size']`)에 대해 계산합니다.
+- **서버 측 평가** (지도교수 피드백: "evaluation is based on the test on
+  server, not individual clients"): `src/server_eval.py`의
+  `evaluate_global_model`/`evaluate_global_model_generation` — 모델과
+  데이터셋만 받는 순수 함수 — 을 서버 루프가 직접 호출합니다. Flower의
+  `NumPyClient.evaluate()`(클라이언트 쪽 인터페이스)는 거치지 않습니다.
+  `clients[0].model`을 재사용하는 건 이미 로드된 모델을 아끼는 메모리
+  절약 디테일일 뿐이고, 평가 시점엔 client 0의 로컬 학습 결과가 아니라
+  그 라운드 `fit()` 결과를 집계한 `global_state`가 로드돼 있습니다. 매
+  라운드 집계 직후 모든 클라이언트는 동일한 global 파라미터로 덮어써지고
+  동일한 공용 held-out set을 보므로, 몇 번을 평가하든 결과가 같습니다 —
+  그래서 서버는 이 held-out을 딱 1번만 평가합니다(8번 평가해도 결과가
+  같아 나머지는 순수 중복 계산). ROUGE-L(생성 필요)도 매 라운드가 아니라
+  **루프 종료 후 최종 global_state로 딱 1회만**, 카테고리 층화 샘플
+  (`config['data']['rouge_l_sample_size']`)에 대해 서버가 직접 계산합니다.
 - **로깅**: 매 라운드 `round_record`(→ `results/logs/{run_name}_rounds.jsonl`에
   한 줄씩 append)에 `round`, `val_loss`, `val_perplexity`,
   `round_latency_sec`, `communication_bytes_this_round`, **`peak_vram_gb`**
@@ -409,13 +422,22 @@ to pass.
 - **Checkpointing**: saved every round, and automatically resumed from the
   last checkpoint at start-up (`resume_or_start_fresh`) — safe even if a
   session is interrupted.
-- **Evaluation cost control**: right after aggregation, every client is
-  overwritten with the same global parameters and sees the same shared
-  held-out set, so only the representative client (`clients[0]`) is
-  evaluated — evaluating all 8 would give the same result, so the rest
-  would be pure duplicate computation. ROUGE-L (which needs generation) is
-  computed **only once, after the loop ends, on the final global
-  parameters**, against a category-stratified sample
+- **Server-side evaluation** (advisor feedback: "evaluation is based on
+  the test on server, not individual clients"): the server loop calls
+  `src/server_eval.py`'s `evaluate_global_model`/
+  `evaluate_global_model_generation` — plain functions taking only a model
+  and a dataset — directly, rather than going through Flower's
+  `NumPyClient.evaluate()` (a client-side interface). Reusing
+  `clients[0].model` is purely a memory-saving detail; at evaluation time
+  it holds `global_state` (that round's aggregated `fit()` results), not
+  client 0's local training result. Right after aggregation, every client
+  is overwritten with the same global parameters and sees the same shared
+  held-out set, so evaluating it any number of times gives the same result
+  — hence the server evaluates this held-out set exactly once (evaluating
+  all 8 would give the same result, so the rest would be pure duplicate
+  computation). ROUGE-L (which needs generation) is also computed by the
+  server directly, **only once, after the loop ends, on the final
+  global_state**, against a category-stratified sample
   (`config['data']['rouge_l_sample_size']`), rather than every round.
 - **Logging**: every round's `round_record` (appended as one line to
   `results/logs/{run_name}_rounds.jsonl`) carries `round`, `val_loss`,
@@ -566,6 +588,7 @@ pytest tests/ -v
 | `test_checkpointing.py` | 저장 후 재개 시 라운드/상태가 정확히 복원되는지 | Week 3 |
 | `test_metrics.py` | ROUGE-L 계산(동일 문자열/무관한 문자열/평균), trainable parameter 집계, VRAM/latency 계측 컨텍스트 매니저, 응답 생성 | Week 3 |
 | `test_scaffold.py` | control variate 집계 수식이 손으로 계산한 값과 일치하는지(delta_y 평균, 참여율에 따른 global_control 스케일링), 로컬 학습 1스텝이 실제로 파라미터를 갱신하는지 | Week 3 |
+| `test_server_eval.py` | `evaluate_global_model`/`evaluate_global_model_generation`이 `NumPyClient.evaluate()` 없이도 PPL/ROUGE-L을 정상적으로 계산하는지 (지도교수 피드백: server-side evaluation) | Week 3 |
 | `test_evaluate.py` | 카테고리별 분해, fairness variance, **압축률×α 상관관계 계산**(페널티 값·음의 상관관계·상수 페널티일 때 0.0·qlora_8bit 비교·ROUGE-L `higher_is_better` 부호), **카테고리별 취약도 스크리닝**(`per_category_compression_penalty`, `score_generations_by_category`와의 입출력 계약 포함), **최고 성능 조합 선정**, (레거시) 상호작용 효과 계산 | Week 4~6 |
 
 | File | What it verifies | Corresponding week |
@@ -579,6 +602,7 @@ pytest tests/ -v
 | `test_checkpointing.py` | round/state are restored exactly after save-then-resume | Week 3 |
 | `test_metrics.py` | ROUGE-L computation (identical/unrelated strings, averaging), trainable parameter counting, the VRAM/latency measurement context manager, response generation | Week 3 |
 | `test_scaffold.py` | that the control-variate aggregation formulas match hand-computed values (delta_y averaging, global_control scaling by participation rate); that one local training step actually updates parameters | Week 3 |
+| `test_server_eval.py` | that `evaluate_global_model`/`evaluate_global_model_generation` correctly compute PPL/ROUGE-L without going through `NumPyClient.evaluate()` (advisor feedback: server-side evaluation) | Week 3 |
 | `test_evaluate.py` | per-category breakdown, fairness variance, **compression×alpha correlation** (penalty values, negative correlation, 0.0 for constant penalty, qlora_8bit comparison, ROUGE-L `higher_is_better` sign), **per-category vulnerability screening** (`per_category_compression_penalty`, incl. its input contract with `score_generations_by_category`), **selecting the best-performing combination**, (legacy) interaction-effect computation | Week 4-6 |
 
 ---
