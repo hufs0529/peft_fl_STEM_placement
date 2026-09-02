@@ -114,31 +114,48 @@ def format_prompt(item: dict) -> str:
 
 def tokenize_example(item: dict, tokenizer, max_length: int) -> dict:
     prompt = format_prompt(item)
-    full_text = prompt + item["response"] + tokenizer.eos_token
-
+    response_ids = tokenizer(item["response"] + tokenizer.eos_token, add_special_tokens=False)["input_ids"]
     prompt_ids = tokenizer(prompt, add_special_tokens=False)["input_ids"]
-    full = tokenizer(
-        full_text, max_length=max_length, truncation=True, padding="max_length", add_special_tokens=False
-    )
 
-    input_ids = full["input_ids"]
-    attention_mask = full["attention_mask"]
-    labels = list(input_ids)
+    # 전체 텍스트(prompt+response)를 뒤에서부터 자르면, prompt(특히 closed_qa/
+    # summarization처럼 context가 긴 카테고리)만으로도 max_length를 넘는
+    # 예제는 response가 통째로 잘려나가 라벨이 전부 -100이 된다. 이런 예제가
+    # 한 미니배치(4개)에 몰리면 loss 분모가 0이 되어 NaN이 나고, FedAvg
+    # 집계를 거쳐 global_state 전체가 오염된다(실측: alpha=0.1 파일럿에서
+    # round 1 val_loss=nan 재현). response 토큰 수만큼은 항상 남기고, 넘치는
+    # 만큼만 prompt 앞부분을 자르는 방식으로 바꿔 이 경우를 원천 차단한다 —
+    # response_ids는 eos_token을 포함하므로 항상 길이 >= 1이라 라벨이 전부
+    # -100이 되는 경우가 생기지 않는다.
+    #
+    # Truncating the concatenated (prompt+response) text from the end meant
+    # that any example whose prompt alone reached max_length (e.g. closed_qa/
+    # summarization, which often have long context) lost the response
+    # entirely, leaving every label as -100. When enough such examples landed
+    # in one micro-batch (4), the loss denominator hit 0 and produced NaN,
+    # which corrupted the whole global_state after FedAvg aggregation
+    # (reproduced: round 1 val_loss=nan on the alpha=0.1 pilot). This always
+    # keeps the response tokens and truncates only the prompt's leading part
+    # by however much is needed — response_ids always has length >= 1 (it
+    # includes eos_token), so labels can never end up fully -100.
+    response_ids = response_ids[:max_length]
+    max_prompt_len = max_length - len(response_ids)
+    prompt_ids = prompt_ids[-max_prompt_len:] if max_prompt_len > 0 else []
 
-    # tokenizer.padding_side가 "left"면 패딩이 앞에 붙어 실제 내용이 인덱스 0이
-    # 아닌 곳에서 시작한다. attention_mask에서 진짜 내용이 시작하는 위치를 찾아
-    # 거기서부터 프롬프트 길이만큼만 마스킹해야 padding_side와 무관하게 정확하다.
-    # If tokenizer.padding_side is "left", padding is prepended so the real content
-    # starts at an index other than 0. We find where the real content begins in
-    # attention_mask and mask only the prompt length from there, so this stays
-    # correct regardless of padding_side.
-    content_start = attention_mask.index(1) if 1 in attention_mask else 0
-    prompt_len = min(len(prompt_ids), max_length)
-    for i in range(content_start, min(content_start + prompt_len, max_length)):
-        labels[i] = -100
-    for i, mask in enumerate(attention_mask):
-        if mask == 0:
-            labels[i] = -100
+    input_ids = prompt_ids + response_ids
+    labels = [-100] * len(prompt_ids) + list(response_ids)
+    attention_mask = [1] * len(input_ids)
+
+    pad_len = max_length - len(input_ids)
+    if pad_len > 0:
+        pad_id = tokenizer.pad_token_id
+        if tokenizer.padding_side == "left":
+            input_ids = [pad_id] * pad_len + input_ids
+            attention_mask = [0] * pad_len + attention_mask
+            labels = [-100] * pad_len + labels
+        else:
+            input_ids = input_ids + [pad_id] * pad_len
+            attention_mask = attention_mask + [0] * pad_len
+            labels = labels + [-100] * pad_len
 
     return {
         "input_ids": torch.tensor(input_ids),

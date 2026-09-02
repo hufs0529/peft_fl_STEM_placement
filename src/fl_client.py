@@ -96,8 +96,20 @@ class FlowerClient(NumPyClient):
         num_examples = 0
         loss_log = []
 
+        # 라운드 하나가 몇 분씩 걸릴 때 콘솔이 조용해서 멈춘 것처럼 보이는 문제
+        # 때문에 추가한 진행 로그 — 클라이언트당 대략 10번 정도만 찍히게
+        # log_every를 잡는다(너무 작은 클라이언트에서 스팸 안 되게, 큰
+        # 클라이언트에서 아예 안 보이지 않게).
+        # Progress log added because a multi-minute round with no console
+        # output looks stuck — log_every is sized so each client prints
+        # roughly 10 lines regardless of its data size (not spammy for small
+        # clients, not silent for large ones).
+        total_micro_steps = max(1, len(self.train_loader)) * local_epochs
+        log_every = max(1, total_micro_steps // 10)
+        global_step = 0
+
         with track_vram_and_latency(self.device) as perf_stats:
-            for _ in range(local_epochs):
+            for epoch in range(local_epochs):
                 for step, batch in enumerate(self.train_loader):
                     batch = {k: v.to(self.device) for k, v in batch.items()}
                     loss = self.model(**batch).loss / accum_steps
@@ -118,6 +130,12 @@ class FlowerClient(NumPyClient):
                         optimizer.zero_grad()
                     loss_log.append(loss.item() * accum_steps)
                     num_examples += batch["input_ids"].shape[0]
+
+                    global_step += 1
+                    if global_step % log_every == 0 or global_step == total_micro_steps:
+                        recent = loss_log[-log_every:]
+                        print(f"    [client {self.client_id}] step {global_step}/{total_micro_steps} "
+                              f"(epoch {epoch + 1}/{local_epochs}) — recent avg loss={sum(recent) / len(recent):.4f}")
 
         param_stats = count_trainable_parameters(self.model)
         avg_train_loss = sum(loss_log) / max(len(loss_log), 1)
