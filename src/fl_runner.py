@@ -173,8 +173,11 @@ def run_federated_training(
         selected_idx = torch.randperm(num_clients)[:num_selected].tolist()
 
         fit_results = []
-        for idx in selected_idx:
+        for i, idx in enumerate(selected_idx):
             client = clients[idx]
+            client_n = len(client.train_loader.dataset)
+            client_start = time.perf_counter()
+            print(f"[{run_name}] round {round_num} — client {idx} 시작 ({i + 1}/{len(selected_idx)}, n={client_n})")
             if fl_type == "scaffold":
                 delta_y, delta_c, num_ex, new_local_control = scaffold_client_fit(
                     client.model, global_state, client.local_control, global_control,
@@ -187,6 +190,8 @@ def run_federated_training(
                 set_trainable_state_dict(client.model, global_state)
                 params, num_ex, metrics = client.fit([v.numpy() for v in global_state.values()], {"server_round": round_num})
                 fit_results.append({"params": params, "num_examples": num_ex, "metrics": metrics})
+            print(f"[{run_name}] round {round_num} — client {idx} 완료 "
+                  f"({time.perf_counter() - client_start:.1f}s, {num_ex} examples)")
 
         if fl_type == "scaffold":
             client_deltas = [(r["delta_y"], r["delta_c"], r["num_examples"]) for r in fit_results]
