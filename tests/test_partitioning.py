@@ -1,6 +1,6 @@
 """6단계: Non-IID 파티셔닝 검증 (Subtask 1.1 — Dirichlet(alpha=1)가 실제로
 비IID 분배를 만들어내는지, alpha가 작을수록 더 비IID해지는지 확인.
-지도교수 피드백: sweep alpha in {0.1, 1, 10}).
+지도교수 피드백: sweep alpha in {0.1, 1, 10, 100}).
 
 더미 데이터 테스트(빠름, 네트워크 불필요)와 실제 Dolly-15k 전체(15,011개)
 데이터 테스트(네트워크 필요, @pytest.mark.network)로 나뉜다. Dolly 데이터는
@@ -14,7 +14,7 @@
 Step 6: Verify non-IID partitioning (Subtask 1.1 — confirm that
 Dirichlet(alpha=1) actually produces a non-IID distribution, and that a
 smaller alpha yields stronger non-IID. Advisor feedback: sweep alpha in
-{0.1, 1, 10}).
+{0.1, 1, 10, 100}).
 
 Split into dummy-data tests (fast, no network) and real full Dolly-15k
 (15,011 examples) tests (needs network, @pytest.mark.network). The Dolly
@@ -81,21 +81,21 @@ def test_partition_is_non_iid():
 
 
 def test_alpha_controls_heterogeneity_strength():
-    """alpha=0.1 > alpha=1 > alpha=10 순으로 비IID 강도(heterogeneity_score)가
-    커야 함 — Dirichlet 파티셔닝이 의도대로 동작하는지에 대한 일반 검증.
+    """alpha=0.1 > alpha=1 > alpha=10 > alpha=100 순으로 비IID 강도
+    (heterogeneity_score)가 커야 함 — Dirichlet 파티셔닝이 의도대로 동작하는지에 대한 일반 검증.
 
     The non-IID strength (heterogeneity_score) should increase in the order
-    alpha=0.1 > alpha=1 > alpha=10 — a general check that Dirichlet
+    alpha=0.1 > alpha=1 > alpha=10 > alpha=100 — a general check that Dirichlet
     partitioning behaves as intended."""
     dataset = make_dummy_dataset()
 
     scores = {}
-    for alpha in [10, 1, 0.1]:
+    for alpha in [100, 10, 1, 0.1]:
         client_data = partition_by_category(dataset, num_clients=8, alpha=alpha, min_category_threshold=150, seed=1)
         scores[alpha] = heterogeneity_score(client_data)
 
     print(f"heterogeneity scores (dummy): {scores}")
-    assert scores[0.1] >= scores[1] >= scores[10] - 0.05, (
+    assert scores[0.1] >= scores[1] >= scores[10] - 0.05 and scores[10] >= scores[100] - 0.05, (
         f"alpha가 작을수록 비IID가 강해야 하는데 순서가 어긋남: {scores}"
     )
 
@@ -177,11 +177,11 @@ def test_dolly_alpha_controls_heterogeneity_strength(dolly_dataset):
     Confirms the same alpha ordering on the real full Dolly-15k dataset —
     re-validates the dummy-data test's intent against real data."""
     scores = {}
-    for alpha in [10, 1, 0.1]:
+    for alpha in [100, 10, 1, 0.1]:
         client_data = partition_by_category(dolly_dataset, num_clients=8, alpha=alpha, min_category_threshold=20, seed=1)
         scores[alpha] = heterogeneity_score(client_data)
 
     print(f"heterogeneity scores (real Dolly-15k): {scores}")
-    assert scores[0.1] >= scores[1] >= scores[10] - 0.05, (
+    assert scores[0.1] >= scores[1] >= scores[10] - 0.05 and scores[10] >= scores[100] - 0.05, (
         f"alpha가 작을수록 비IID가 강해야 하는데 순서가 어긋남: {scores}"
     )
