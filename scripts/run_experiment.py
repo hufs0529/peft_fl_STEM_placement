@@ -1,18 +1,18 @@
 """Week 4 본 실험 실행 진입점 (Week 5 지도교수 피드백으로 설계 개정).
 
-Core design (개정): 압축률(3) x FL(2) x Dirichlet alpha(3) = 18회 실행.
+Core design (개정): 압축률(3) x FL(2) x Dirichlet alpha(4) = 24회 실행.
 지도교수 피드백: 이 연구의 중점을 "압축률과 non-IID 강도의 상관관계"로
 재설정 — SCAFFOLD는 core 설계에서 제외(코드/테스트는 그대로 유지).
 
     for compression in lora "qlora --qlora-bits 8" "qlora --qlora-bits 4"; do
       for fl in fedavg fedprox; do
-        for alpha in 0.1 1 10; do
+        for alpha in 0.1 1 10 100; do
           python scripts/run_experiment.py --peft $compression --fl $fl --alpha $alpha
         done
       done
     done
 
-18개가 모두 끝나면 scripts/analyze_interaction.py를 실행해 압축률 x alpha
+24개가 모두 끝나면 scripts/analyze_interaction.py를 실행해 압축률 x alpha
 상관관계와, Task 2 진단 실험(local_epochs=5)에 쓸 조합을 확인한다.
 
 Task 2 diagnostic:
@@ -24,20 +24,20 @@ Task 2 diagnostic:
 Entry point for running the Week 4 main experiment (design revised in
 Week 5 per advisor feedback).
 
-Core design (revised): compression (3) x FL (2) x Dirichlet alpha (3) =
-18 runs. Advisor feedback reframed this project's focus as "the
+Core design (revised): compression (3) x FL (2) x Dirichlet alpha (4) =
+24 runs. Advisor feedback reframed this project's focus as "the
 correlation between compression rate and non-IID intensity" — SCAFFOLD
 is dropped from the core design (its code/tests are kept).
 
     for compression in lora "qlora --qlora-bits 8" "qlora --qlora-bits 4"; do
       for fl in fedavg fedprox; do
-        for alpha in 0.1 1 10; do
+        for alpha in 0.1 1 10 100; do
           python scripts/run_experiment.py --peft $compression --fl $fl --alpha $alpha
         done
       done
     done
 
-Once all 18 are finished, run scripts/analyze_interaction.py to check the
+Once all 24 are finished, run scripts/analyze_interaction.py to check the
 compression x alpha correlation and the combination to use for the Task 2
 diagnostic experiment below.
 
@@ -97,7 +97,9 @@ def build_run_name(config: dict) -> str:
     )
     alpha = config["partitioning"]["alpha"]
     if alpha != 1:
-        name += f"_a{alpha}"
+        # float()로 정규화: --alpha 10 -> "a10.0" (실제 로그 파일명과 일치)
+        # Normalize via float(): --alpha 10 -> "a10.0", matching the log filenames
+        name += f"_a{float(alpha)}"
     if config["peft"]["type"] == "qlora":
         qlora_bits = config["peft"].get("qlora_bits", 4)
         if qlora_bits != 4:
@@ -113,9 +115,9 @@ def main():
     parser.add_argument("--local-epochs", type=int, default=None, help="Subtask 2.2 강건성 점검: 1(기본) vs 5")
     parser.add_argument(
         "--alpha", type=float, default=None,
-        help="지도교수 피드백: Dirichlet 비IID 강도. Core 18조합 설계는 0.1/1/10 "
+        help="지도교수 피드백: Dirichlet 비IID 강도. Core 24조합 설계는 0.1/1/10/100 "
              "전부를 사용 / advisor feedback: Dirichlet non-IID intensity. The core "
-             "18-combination design uses all of 0.1/1/10",
+             "24-combination design uses all of 0.1/1/10/100",
     )
     parser.add_argument(
         "--qlora-bits", type=int, default=None, choices=[4, 8],
@@ -127,7 +129,7 @@ def main():
         "--num-rounds", type=int, default=None,
         help="num_rounds 상한 오버라이드. 파일럿으로 가장 어려운 조합"
              "(qlora --qlora-bits 4 --alpha 0.1)을 넉넉한 캡으로 먼저 돌려서 "
-             "실제 converged_round를 확인한 뒤, 본 18조합의 num_rounds를 "
+             "실제 converged_round를 확인한 뒤, 본 24조합의 num_rounds를 "
              "역산해서 정하는 용도 (README '파일럿으로 num_rounds 상한 역산' "
              "절 참고) / override the num_rounds ceiling. Meant for running a "
              "pilot on the hardest combination (qlora --qlora-bits 4 --alpha "

@@ -2,13 +2,13 @@
 
 Subtask 1.1: 8클라이언트, Dolly-15k를 native task category 기준
 Dirichlet(alpha=1)로 비IID 분배 (고정값, 스윕 없음). 지도교수 피드백:
-스윕 설계에서는 alpha in {0.1, 1, 10} 세 값을 사용.
+스윕 설계에서는 alpha in {0.1, 1, 10, 100} 네 값을 사용.
 
 Dirichlet(alpha) non-IID partitioning + minimum-category-threshold resampling.
 
 Subtask 1.1: distribute Dolly-15k non-IID across 8 clients, keyed on the
 native task category, using Dirichlet(alpha=1) (a fixed value, no sweep).
-Advisor feedback: the sweep design uses alpha in {0.1, 1, 10}.
+Advisor feedback: the sweep design uses alpha in {0.1, 1, 10, 100}.
 """
 
 from collections import defaultdict
