@@ -1,4 +1,4 @@
-"""18조합(3압축 x 2FL x 3α) 결과 시각화 템플릿.
+"""24조합(3압축 x 2FL x 4α) 결과 시각화 템플릿.
 
 results/logs/*_rounds.jsonl에서 실제 실행 결과를 읽어 PPL/ROUGE-L/통신량/
 수렴속도/**peak VRAM/총 학습 시간** 도표를 results/figures/에 생성한다.
@@ -13,7 +13,7 @@ peak_vram_gb는 alpha와 거의 무관(압축 강도에만 좌우)해야 정상�
 사용법:
     python scripts/plot_results.py
 
-A visualization template for the 18-combination (3 compression x 2 FL x 3
+A visualization template for the 24-combination (3 compression x 2 FL x 4
 alpha) results.
 
 Reads actual run results from results/logs/*_rounds.jsonl and produces
@@ -34,6 +34,7 @@ Usage:
 
 import json
 import os
+import math
 import random
 import sys
 from pathlib import Path
@@ -45,7 +46,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-from scripts.analyze_interaction import COMPRESSIONS, FLS, ALPHAS, build_run_name
+from scripts.analyze_interaction import COMPRESSIONS, FLS, ALPHAS, N_COMBOS, build_run_name
 
 FIG_DIR = "results/figures"
 
@@ -68,9 +69,9 @@ SURFACE = "#fcfcfb"
 
 
 def load_real_results() -> Optional[List[dict]]:
-    """results/logs/에서 18개 실행 로그를 전부 읽는다. 하나라도 없으면 None.
+    """results/logs/에서 24개 실행 로그를 전부 읽는다. 하나라도 없으면 None.
 
-    Reads all 18 run logs from results/logs/. Returns None if any are missing.
+    Reads all 24 run logs from results/logs/. Returns None if any are missing.
     """
     results = []
     for compression in COMPRESSIONS:
@@ -104,7 +105,19 @@ def make_sample_results() -> List[dict]:
     A synthetic pattern where the compression penalty grows as non-IID
     intensifies (alpha shrinks)."""
     rng = random.Random(7)
-    base_ppl = {0.1: 12.0, 1: 9.0, 10: 7.5}
+    # ALPHAS에 값이 추가돼도 KeyError가 나지 않도록 dict 조회 대신 보간식을
+    # 쓴다 — alpha가 커질수록(IID에 가까울수록) PPL과 증폭계수가 함께 낮아지는
+    # 형태만 유지하면 되는 미리보기용 합성 데이터다.
+    # Use a formula instead of a dict lookup so adding values to ALPHAS never
+    # raises KeyError — this is preview-only synthetic data, and all it needs
+    # to preserve is the shape: larger alpha (closer to IID) means lower PPL
+    # and a smaller amplifier.
+    def _base_ppl(a: float) -> float:
+        return 7.0 + 2.5 / (1.0 + math.log10(max(a, 1e-6)) + 1.5)
+
+    def _amplifier(a: float) -> float:
+        return 0.4 + 2.6 / (1.0 + math.log10(max(a, 1e-6)) + 1.5)
+
     penalty_scale = {"lora": 0.0, "qlora_8bit": 0.4, "qlora_4bit": 1.0}
     # peak_vram_gb: 압축이 강할수록 낮고(양자화가 base 모델 메모리를 줄임),
     # alpha와는 거의 무관해야 정상 — 상관관계가 보이면 오히려 이상 신호.
@@ -122,8 +135,8 @@ def make_sample_results() -> List[dict]:
         for fl in FLS:
             fl_offset = 0.0 if fl == "fedprox" else 0.6
             for alpha in ALPHAS:
-                non_iid_amplifier = {0.1: 3.0, 1: 1.3, 10: 0.6}[alpha]
-                ppl = base_ppl[alpha] + fl_offset + penalty_scale[compression] * non_iid_amplifier
+                non_iid_amplifier = _amplifier(alpha)
+                ppl = _base_ppl(alpha) + fl_offset + penalty_scale[compression] * non_iid_amplifier
                 ppl += rng.uniform(-0.15, 0.15)
                 rounds = max(3, round(6 + non_iid_amplifier + penalty_scale[compression] * 1.5 + {"lora": 0, "qlora_8bit": 0.4, "qlora_4bit": 0.8}[compression] + rng.uniform(-0.4, 0.4)))
                 rouge = max(0.05, 0.42 - 0.10 * (penalty_scale[compression] * non_iid_amplifier / 3.0) + rng.uniform(-0.01, 0.01))
@@ -176,8 +189,19 @@ def plot_trend(results: List[dict], field: str, ylabel: str, title: str, filenam
                         textcoords="offset points", fontsize=8.5, color=COLORS[compression], va="center", ha="right")
         ax.set_title(fl.upper(), fontsize=11, color=INK, loc="left")
         ax.set_xlabel("Dirichlet α (non-IID intensity →)", fontsize=9.5, color=MUTED)
+        # alpha는 10배씩 커지는 등비수열(0.1/1/10/100)이라 선형 축에 놓으면
+        # 작은 값 셋이 한쪽 끝에 뭉쳐 눈금 라벨까지 겹친다. 도표 가독성만을
+        # 위한 축 설정이며, compute_compression_alpha_trend의 상관계산은
+        # 원본 alpha 그대로 유지한다(지도교수 확인).
+        # alpha is geometric (0.1/1/10/100, x10 each step), so on a linear axis
+        # the three small values collapse into one edge and even the tick labels
+        # overlap. This is a chart-readability setting only — the correlation in
+        # compute_compression_alpha_trend still uses raw alpha (advisor-confirmed).
+        ax.set_xscale("log")
         ax.set_xticks(ALPHAS)
-        ax.invert_xaxis()  # 왼쪽(near-IID, alpha=10) -> 오른쪽(강한 non-IID, alpha=0.1)
+        ax.set_xticklabels([f"{a:g}" for a in ALPHAS])
+        ax.minorticks_off()
+        ax.invert_xaxis()  # 왼쪽(near-IID, alpha=100) -> 오른쪽(강한 non-IID, alpha=0.1)
         ax.margins(x=0.18)
     axes[0].set_ylabel(ylabel, fontsize=9.5, color=MUTED)
     fig.suptitle(title, fontsize=13, color=INK, x=0.02, ha="left", fontweight="bold")
@@ -218,7 +242,7 @@ def plot_grouped_bar(results: List[dict], field: str, ylabel: str, title: str, f
 def write_summary_table(results: List[dict], is_sample: bool):
     path = os.path.join(FIG_DIR, "summary_table.md")
     with open(path, "w") as f:
-        f.write("# 18조합 결과 요약" + (" (SAMPLE DATA)" if is_sample else "") + "\n\n")
+        f.write(f"# {N_COMBOS}조합 결과 요약" + (" (SAMPLE DATA)" if is_sample else "") + "\n\n")
         f.write("| compression | fl | alpha | val_perplexity | rouge_l | rounds_run | total_communication_bytes | peak_vram_gb | total_latency_sec |\n")
         f.write("|---|---|---|---|---|---|---|---|---|\n")
         for compression in COMPRESSIONS:
@@ -239,7 +263,7 @@ def main():
     results = load_real_results()
     is_sample = results is None
     if is_sample:
-        print("results/logs/에 18개 로그가 아직 없어 샘플 데이터로 미리보기를 생성합니다.")
+        print(f"results/logs/에 {N_COMBOS}개 로그가 아직 없어 샘플 데이터로 미리보기를 생성합니다.")
         print("(No real logs found in results/logs/ yet — generating a preview with sample data.)")
         results = make_sample_results()
 
