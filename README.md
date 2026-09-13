@@ -1,54 +1,17 @@
 # Dolly-15k FL × PEFT Research Placement
 
-6주 연구 실습 프로젝트 코드베이스. 연구계획서 *"Does Drift-Correction
-Sophistication Interact with PEFT Quantisation Noise in Federated LLM
-Fine-Tuning?"*를 그대로 코드로 구현했습니다.
-
 A 6-week research placement project codebase. It implements the research
 proposal *"Does Drift-Correction Sophistication Interact with PEFT
 Quantisation Noise in Federated LLM Fine-Tuning?"* directly in code.
 
 ---
 
-## 0. 이 프로젝트가 묻는 질문 (연구계획서 Aims, 코드와의 대응) (0. The Question This Project Asks — Research Proposal Aims Mapped to Code)
-
-| Aim | 질문 요약 | 답을 만드는 코드 |
-|---|---|---|
-| **Aim 1** (Task 1) | 교정 정교함(FedAvg→FedProx)의 이점이 PEFT 압축이 강해져도(무압축→8bit→4bit) 일관되게 유지되는가? 이 이점이 non-IID 강도(Dirichlet α)와 상관관계가 있는가? 3압축×2FL×3α factorial로 검증. | `src/fl_client.py`(FedProx proximal term), `src/evaluate.py::compute_compression_alpha_trend`(압축률×α 상관관계 계산) |
-| **Aim 2** (Task 2) | 발견된 상관관계 하에서, 성능이 가장 좋았던 조합이 local_epochs를 늘려도 견고한가? | `src/evaluate.py::select_best_performing_combination`, `src/evaluate.py::per_category_breakdown` |
+## 0. The Question This Project Asks — Research Proposal Aims Mapped to Code
 
 | Aim | Question summary | Code that produces the answer |
 |---|---|---|
 | **Aim 1** (Task 1) | Does the benefit of drift-correction sophistication (FedAvg→FedProx) hold consistently as PEFT compression intensifies (uncompressed→8-bit→4-bit)? Is this benefit correlated with non-IID intensity (Dirichlet alpha)? Verified with a 3 compression × 2 FL × 3 alpha factorial design. | `src/fl_client.py` (FedProx proximal term), `src/evaluate.py::compute_compression_alpha_trend` (compression×alpha correlation) |
 | **Aim 2** (Task 2) | Given the observed correlation, is the best-performing combination robust to a larger local_epochs? | `src/evaluate.py::select_best_performing_combination`, `src/evaluate.py::per_category_breakdown` |
-
-> **설계 변경 안내 (Week 5, 지도교수 피드백)**: 이 프로젝트는 원래
-> 3FL(FedAvg/FedProx/SCAFFOLD)×2PEFT(LoRA/QLoRA)의 6조합으로 "교정
-> 정교함 × 압축 강도"를 검증할 계획이었습니다. Week 5에 지도교수로부터
-> "연구의 중점을 압축률과 non-IID 강도의 상관관계로 두는 게 좋겠다"는
-> 피드백을 받아, SCAFFOLD를 core에서 빼고(코드/테스트는 유지) 압축
-> 강도를 3단계(무압축/8bit/4bit)로, Dirichlet α를 3단계(0.1/1/10)로
-> 넓힌 **3×2×3=18조합** 설계로 개정했습니다. 원래 연구질문·6조합 설계는
-> `week4` 브랜치 이전 시점의 히스토리로 남아있습니다.
->
-> **Design change notice (Week 5, advisor feedback)**: this project
-> originally planned to verify "correction sophistication × compression
-> intensity" with 6 combinations of 3 FL algorithms
-> (FedAvg/FedProx/SCAFFOLD) × 2 PEFT methods (LoRA/QLoRA). In Week 5, the
-> advisor gave feedback that "the project's focus should be the
-> correlation between compression rate and non-IID intensity," so the
-> design was revised to drop SCAFFOLD from the core (its code/tests are
-> kept) and widen compression to 3 levels (uncompressed/8-bit/4-bit) and
-> Dirichlet alpha to 3 levels (0.1/1/10) — a **3×2×3 = 18-combination**
-> design. The original research question and 6-combination design remain
-> in the history prior to the `week4` branch.
-
-**핵심 설계 원칙**: 이 코드베이스는 18개 조합(3압축×2FL×3α)의 core 실험으로
-"압축 강도 × non-IID 강도"의 격자를 직접 채우고, Task 2는 이 격자가
-보여준 결과를 **왜** 나타나는지 설명하는 데 필요한 최소한의 진단
-실험(local-epoch 강건성 점검) 하나로만 한정합니다 — 관련 없는 축(Prompt
-Tuning, 부분 참여, LLM-judge, 중앙집중형 베이스라인)은 이번 연구계획서
-범위 밖이므로 포함하지 않습니다.
 
 **Core design principle**: This codebase fills the "compression intensity ×
 non-IID intensity" grid directly with 18 core combinations (3 compression ×
@@ -60,40 +23,7 @@ this research proposal and are not included.
 
 ---
 
-## 1. 폴더 구조 (1. Folder Structure)
-
-```
-dolly15k-fl-peft-v2/
-├── README.md                     # 이 파일
-├── requirements.txt
-├── configs/
-│   ├── dev_config.yaml           # Week 1~3 검증용 (gpt2, 2클라이언트, 2라운드)
-│   └── experiment_config.yaml    # Week 4 본실험용 (Qwen2.5-0.5B, 8클라이언트, 10라운드; Week 5 개정)
-├── src/                          # dev/experiment 공용 핵심 로직
-│   ├── models.py                   # LoRA/QLoRA(4bit·8bit, core), DoRA(미사용 진단 대조군) 래핑
-│   ├── data.py                     # Dolly-15k 로딩, 토크나이징, held-out 스플릿
-│   ├── partitioning.py             # Dirichlet(alpha=1) 비IID + 카테고리 리샘플링
-│   ├── communication.py            # FL 파라미터 왕복 + payload 크기 계산
-│   ├── fl_client.py                # 공통 클라이언트 (FedProx proximal term, warmup, VRAM/latency, ROUGE-L)
-│   ├── fl_runner.py                # 수동 라운드 루프 — 수렴기준/체크포인트/로깅/W&B 전부 배선
-│   ├── server_eval.py              # 서버 측 글로벌 모델 평가(PPL/ROUGE-L) — NumPyClient.evaluate() 미사용
-│   ├── scaffold.py                 # SCAFFOLD 실제 구현 (control variate) — core에서는 제외, 코드/테스트만 유지
-│   ├── convergence.py              # 3라운드 연속 <1% 개선 시 조기종료
-│   ├── checkpointing.py            # 라운드별 저장/재개
-│   ├── metrics.py                  # VRAM, latency, ROUGE-L, trainable param count
-│   └── evaluate.py                 # 카테고리별 분해, client fairness, 압축률x α 상관관계 계산
-├── tests/                        # 아래 "테스트 구성" 절 참고
-├── scripts/
-│   ├── run_dev_pilot.py            # Week 1: 실제 모델 단일 클라이언트 검증
-│   ├── run_experiment.py           # Task 1 core 18조합(3압축x2FLx3α) + Task 2 진단 실행 진입점
-│   ├── analyze_interaction.py      # Subtask 1.3/2.2/2.3: 압축률x α 상관관계 + 카테고리별 취약도 스크리닝 + 진단 대상 선정
-│   └── plot_results.py             # 18조합 결과를 PPL/ROUGE-L/통신/수렴속도/VRAM/시간 도표+요약표로 시각화
-└── results/
-    ├── checkpoints/{run_name}/round_NNN.pt   # 라운드별 체크포인트 (git 추적 제외)
-    ├── logs/{run_name}_rounds.jsonl          # 라운드별 전체 지표
-    ├── logs/{run_name}_generations.jsonl     # 마지막 생성 라운드의 예측/참조 (Subtask 2.3 입력)
-    └── figures/                              # plot_results.py 출력 (6도표 + summary_table.md)
-```
+## 1. Folder Structure
 
 ```
 dolly15k-fl-peft-v2/
@@ -130,11 +60,7 @@ dolly15k-fl-peft-v2/
 
 ---
 
-## 2. Task 1 core 설계가 코드에 어떻게 반영되는가 (2. How the Task 1 Core Design Is Reflected in the Code)
-
-개정된 core 설계(**3압축 × 2FL × 3α = 18조합**)는 하나의 스크립트
-(`run_experiment.py`)에 `--peft`(+`--qlora-bits`), `--fl`, `--alpha` 세
-축의 인자로 압축되어 있습니다. 즉 아래 18개 명령이 core 전체입니다:
+## 2. How the Task 1 Core Design Is Reflected in the Code
 
 The revised core design (**3 compression × 2 FL × 3 alpha = 18
 combinations**) is compressed into a single script (`run_experiment.py`)
@@ -151,40 +77,13 @@ for compression in lora "qlora --qlora-bits 8" "qlora --qlora-bits 4"; do
 done
 ```
 
-18개가 모두 끝나면:
-
 Once all 18 have finished:
 
 ```bash
 python scripts/analyze_interaction.py
 ```
 
-를 실행합니다. 이 스크립트는 네 가지를 계산합니다:
-
 is run. This script computes four things:
-
-1. **압축률×α 격자** — 18개 조합의 val_perplexity를 (압축, FL, α) 격자로
-   출력합니다.
-2. **Subtask 1.3 압축률×non-IID 상관관계** — 각 (FL, α) 지점에서
-   "압축 페널티"(QLoRA-4bit/8bit 각각의 성능 − LoRA(무압축) 성능)를
-   구하고, α가 작아질수록(non-IID가 강해질수록) 이 페널티가 커지는지를
-   Pearson 상관계수로 계산합니다. **4bit와 8bit을 각각 따로 계산**해서
-   나란히 비교하고(4bit 상관계수가 8bit보다 더 음수면, 압축이 강할수록
-   non-IID 민감도도 커지는 dose-response), **PPL뿐 아니라 ROUGE-L(높을수록
-   좋음, `higher_is_better=True`)로도** 같은 계산을 반복해 두 성능 지표가
-   같은 결론을 가리키는지 교차검증합니다. 이것이 지도교수 피드백("압축률과
-   non-IID 강도의 상관관계를 보라")에 대한 직접적인 정량적 답입니다
-   (`src/evaluate.py::compute_compression_alpha_trend`).
-3. **Subtask 2.3 카테고리별 취약도 스크리닝** — `*_generations.jsonl`에서
-   예제별 ROUGE-L을 다시 계산해(`score_generations_by_category`) 카테고리별로
-   묶고, 어떤 태스크 카테고리가 압축×non-IID 상호작용에 특히 취약한지
-   z-score로 스크리닝합니다(`src/evaluate.py::per_category_compression_penalty`).
-4. **Subtask 2.2 대상 선정** — 18조합 중 task performance가 가장 좋았던
-   조합을 골라, local_epochs=5 강건성 점검 대상으로 삼습니다.
-
-18개 로그가 갖춰지면 `python scripts/plot_results.py`로 같은 데이터를
-PPL/ROUGE-L/통신/수렴속도/**VRAM/총 학습 시간** 6개 도표 + 요약표로
-시각화할 수 있습니다(`results/figures/`).
 
 1. **Compression×alpha grid** — prints the val_perplexity of all 18
    combinations as a (compression, FL, alpha) grid.
@@ -215,34 +114,7 @@ same data as 6 figures (PPL/ROUGE-L/communication/convergence-speed/
 **VRAM/total training latency**) plus a summary table
 (`results/figures/`).
 
-### 파일럿으로 num_rounds 상한 역산 (Deriving the num_rounds Ceiling via a Pilot Run)
-
-`experiment_config.yaml`의 `federated.num_rounds`(현재 10)는 수렴 기준(3라운드
-연속 <1% 개선)이 인위적인 캡에 막히지 않고 실제로 발동할 만큼 넉넉해야
-합니다. 18조합 중 가장 늦게 수렴할 것으로 예상되는 조합(`qlora --qlora-bits
-4 --alpha 0.1` — 가장 강한 압축 × 가장 강한 non-IID)으로 먼저 파일럿을
-돌려서 실제 `converged_round`를 확인한 뒤 역산하는 것을 권장합니다:
-
-```bash
-# 1) 캡을 넉넉하게 풀고 파일럿 1회 실행 (본 18조합 실행 전에)
-python scripts/run_experiment.py --peft qlora --qlora-bits 4 --fl fedavg --alpha 0.1 --num-rounds 30
-
-# 2) 출력의 "수렴 라운드"(converged_round)를 확인 후, 그 값 + 여유분(예: +3~5)을
-#    experiment_config.yaml의 federated.num_rounds에 반영
-# 3) 이 파일럿 run은 core 18조합 중 하나(qlora_4bit/fedavg/alpha=0.1)와 run_name이
-#    동일하므로, 자연 수렴했다면 재실행할 필요 없이 그대로 core 결과로 재사용됩니다.
-```
-
-`--num-rounds`는 이 파일럿 1회성 오버라이드 전용입니다 — 본 18조합
-실행에서는 `experiment_config.yaml`에 반영한 값을 그대로 쓰면 되므로
-매번 넘길 필요가 없습니다. 18조합을 모두 돌린 뒤에는 각 결과의
-`converged_round`가 `None`(=끝까지 수렴 못 함)인 조합이 없는지 반드시
-확인하세요 — 있다면 그 조합만 라운드 부족으로 잘린 것이라 압축×α
-상관분석에서 "진짜 압축이 나쁘다"와 구분되지 않는 아티팩트가 됩니다.
-
-> 이 저장소를 개발 중인 로컬 환경(GPU 없음, `torch.cuda.is_available()
-> == False`)에서는 QLoRA 파일럿을 실제로 실행할 수 없습니다 — 위 절차는
-> 6번 섹션의 GPU 인스턴스에서 실행해야 합니다.
+### Deriving the num_rounds Ceiling via a Pilot Run
 
 `experiment_config.yaml`'s `federated.num_rounds` (currently 10) needs to
 be generous enough that the convergence criterion (3 consecutive rounds of
@@ -276,54 +148,23 @@ correlation analysis.
 > — the procedure above needs to run on the GPU instance described in
 > section 6.
 
-### Task 2 진단 실행 (Task 2 Diagnostic Execution)
-
-| 무엇을 검증하는가 | 명령 |
-|---|---|
-| Local epoch 1 vs 5 강건성 점검 (best-performing 조합에 적용) | `run_experiment.py --peft <best_peft> --fl <best_fl> --alpha <best_alpha> [--qlora-bits 8] --local-epochs 5` |
+### Task 2 Diagnostic Execution
 
 | What it verifies | Command |
 |---|---|
 | Local epoch 1 vs 5 robustness check (applied to the best-performing combination) | `run_experiment.py --peft <best_peft> --fl <best_fl> --alpha <best_alpha> [--qlora-bits 8] --local-epochs 5` |
 
-`<best_peft>`/`<best_fl>`/`<best_alpha>`는 `analyze_interaction.py`
-출력에서 그대로 복사해 쓰면 됩니다.
-
 `<best_peft>` / `<best_fl>` / `<best_alpha>` can simply be copied from the
 output of `analyze_interaction.py`.
-
-Subtask 2.3(카테고리별 분해)은 추가 GPU 비용 없이 `src/evaluate.py`의
-`per_category_breakdown`과 `results/logs/*_rounds.jsonl`에 이미 기록된
-라운드별 지표에서 바로 계산합니다.
 
 Subtask 2.3 (per-category breakdown) is computed directly from
 `per_category_breakdown` in `src/evaluate.py` and the per-round metrics
 already logged in `results/logs/*_rounds.jsonl`, with no additional GPU
 cost.
 
-> SCAFFOLD/DoRA 관련 코드(`src/scaffold.py`, `--peft dora`,
-> `--fl scaffold`)는 여전히 동작하고 테스트도 통과하지만, 위 core
-> 18조합에는 포함되지 않습니다. 필요하면 별도 진단으로 수동 실행할 수
-> 있습니다.
->
-> The SCAFFOLD/DoRA code (`src/scaffold.py`, `--peft dora`,
-> `--fl scaffold`) still works and its tests still pass, but it is not
-> included in the 18 core combinations above. It can still be run
-> manually as a separate diagnostic if needed.
-
 ---
 
-## 3. 각 모듈이 연구계획서의 어느 부분과 대응하는가 (3. How Each Module Maps to the Research Proposal)
-
-### `src/models.py` — Subtask 1.1, 2.1
-- **core**: LoRA(r=8, α=16, dropout=0.05, 무압축), QLoRA(`qlora_bits`로
-  4bit NF4 또는 8bit INT8 선택 — 압축률 스윕용)
-- **미사용 진단**: DoRA(`use_dora=True`, 양자화 없음)는 여전히 코드에
-  있지만, 개정된 core 18조합 설계에는 포함되지 않습니다.
-- 다른 PEFT 방식(Prompt Tuning, Adapter Tuning 등)은 이번 연구계획서의
-  범위 밖이므로 포함하지 않았습니다 — `lora`/`qlora`/`dora` 이외의 값을
-  넘기면 `ValueError`가 나는 것도 의도된 동작이며,
-  `tests/test_model_wiring.py`에서 이를 확인합니다.
+## 3. How Each Module Maps to the Research Proposal
 
 ### `src/models.py` — Subtask 1.1, 2.1
 - **core**: LoRA (r=8, α=16, dropout=0.05, uncompressed), QLoRA
@@ -336,13 +177,7 @@ cost.
   value other than `lora`/`qlora`/`dora` intentionally raises a
   `ValueError`, which `tests/test_model_wiring.py` verifies.
 
-### `src/scaffold.py` — core에서 제외됨(코드/테스트는 유지) (Dropped from Core — Code/Tests Kept)
-FedAvg/FedProx는 Flower의 표준 weighted-average 집계로 충분하지만, SCAFFOLD는
-클라이언트별 control variate를 별도로 유지·통신해야 해서 `fl_runner.py`가 이
-파일의 `scaffold_client_fit()`/`scaffold_aggregate()`를 직접 호출하는 별도
-경로로 처리합니다. **간소화 구현(Option II 근사)**입니다. Week 5 지도교수
-피드백으로 core 18조합 설계에서는 제외됐지만, `--fl scaffold`로 여전히
-수동 실행 가능하고 `tests/test_fl_integration.py`도 계속 통과합니다.
+### Dropped from Core — Code/Tests Kept
 
 FedAvg/FedProx are adequately handled by Flower's standard
 weighted-average aggregation, but SCAFFOLD needs to separately maintain
@@ -353,18 +188,6 @@ implementation (Option II approximation)**. It was dropped from the core
 18-combination design per Week 5 advisor feedback, but can still be run
 manually via `--fl scaffold`, and `tests/test_fl_integration.py` continues
 to pass.
-
-### `src/fl_client.py` — Subtask 1.1, 1.2
-- FedProx일 때만 `(mu/2)*||local-global||^2` proximal term이 loss에 추가됩니다
-  (`is_fedprox` 분기, μ=0.01).
-- 첫 라운드(`server_round==1`)에만 linear warmup이 적용됩니다.
-- `track_vram_and_latency()`로 감싸서 Peak VRAM/Training Latency를 자동 측정합니다.
-- `evaluate()`는 Flower의 `NumPyClient` 인터페이스를 만족시키기 위해
-  남아있을 뿐, 실제 서버 루프(`fl_runner.py`)는 지도교수 피드백
-  ("evaluation is based on the test on server, not individual clients")에
-  따라 이 메서드를 호출하지 않고 `src/server_eval.py`의 순수 함수를
-  직접 호출합니다 — `evaluate()`는 내부적으로 그 함수들을 재사용할 뿐
-  로직이 중복되지는 않습니다(아래 `fl_runner.py` 절 참고).
 
 ### `src/fl_client.py` — Subtask 1.1, 1.2
 - The `(mu/2)*||local-global||^2` proximal term is added to the loss only
@@ -378,45 +201,6 @@ to pass.
   calls it, calling `src/server_eval.py`'s pure functions directly
   instead. `evaluate()` internally reuses those same functions, so there's
   no duplicated logic (see the `fl_runner.py` section below).
-
-### `src/fl_runner.py` — Subtask 1.2, 2.3
-- **수렴 기준**: `ConvergenceTracker`가 매 라운드 검증 loss를 받아 3라운드 연속
-  1% 미만 개선이면 루프를 멈춥니다(≤10라운드).
-- **체크포인트**: 매 라운드 저장, 실행 시작 시 자동으로 마지막 체크포인트에서
-  재개(`resume_or_start_fresh`) — 세션이 끊겨도 안전합니다.
-- **서버 측 평가** (지도교수 피드백: "evaluation is based on the test on
-  server, not individual clients"): `src/server_eval.py`의
-  `evaluate_global_model`/`evaluate_global_model_generation` — 모델과
-  데이터셋만 받는 순수 함수 — 을 서버 루프가 직접 호출합니다. Flower의
-  `NumPyClient.evaluate()`(클라이언트 쪽 인터페이스)는 거치지 않습니다.
-  평가엔 `clients[0].model`을 빌려 쓰지 않고 **어떤 클라이언트에도
-  속하지 않는 서버 전용 모델 인스턴스(`server_model`)**를 따로 만들어
-  씁니다 — 로컬 시뮬레이션이라 결국 같은 프로세스/GPU를 쓰지만(모델
-  인스턴스 8+1=9개 공존), 코드상 "client 0이 평가한다"로 읽힐 여지를
-  없앴습니다. 평가 시점엔 `server_model`에 그 라운드 `fit()` 결과를
-  집계한 `global_state`가 로드돼 있습니다. 매
-  라운드 집계 직후 모든 클라이언트는 동일한 global 파라미터로 덮어써지고
-  동일한 공용 held-out set을 보므로, 몇 번을 평가하든 결과가 같습니다 —
-  그래서 서버는 이 held-out을 딱 1번만 평가합니다(8번 평가해도 결과가
-  같아 나머지는 순수 중복 계산). ROUGE-L(생성 필요)도 매 라운드가 아니라
-  **루프 종료 후 최종 global_state로 딱 1회만**, 카테고리 층화 샘플
-  (`config['data']['rouge_l_sample_size']`)에 대해 서버가 직접 계산합니다.
-- **로깅**: 매 라운드 `round_record`(→ `results/logs/{run_name}_rounds.jsonl`에
-  한 줄씩 append)에 `round`, `val_loss`, `val_perplexity`,
-  `round_latency_sec`, `communication_bytes_this_round`, **`peak_vram_gb`**
-  (그 라운드 참여 클라이언트들의 평균 — FedAvg/FedProx만, `fl_client.py`의
-  `fit()`이 `track_vram_and_latency()`로 이미 계측한 값)를 기록합니다.
-  마지막 라운드에는 `rouge_l`도 추가되고, 생성 결과는 별도로
-  `results/logs/{run_name}_generations.jsonl`에 저장됩니다. 루프가 끝나면
-  `run_federated_training()`의 반환값(호출부에서 최종 요약으로 씀)에
-  `total_communication_bytes`, **`total_latency_sec`**(라운드별
-  `round_latency_sec` 합), **`avg_peak_vram_gb`**(라운드별 `peak_vram_gb`
-  평균)까지 추가됩니다 — 압축×non-IID 트레이드오프 분석에 필요한 통신/
-  시간/메모리 지표가 전부 이 두 곳(`*_rounds.jsonl` 파일 + 반환값)에
-  남습니다. SCAFFOLD는 `scaffold_client_fit()`이 이 계측을 하지 않아
-  `peak_vram_gb`가 `None`으로 남습니다(core 분석에서 제외돼 있어 의도적).
-- **W&B**: `config['logging']['use_wandb']=true`면 실시간으로 같은 지표를
-  W&B 대시보드에도 올립니다.
 
 ### `src/fl_runner.py` — Subtask 1.2, 2.3
 - **Convergence criterion**: `ConvergenceTracker` takes the validation loss
@@ -468,45 +252,6 @@ to pass.
   also pushed to the W&B dashboard in real time.
 
 ### `src/evaluate.py` — Subtask 1.3, 2.2, 2.3
-- `compute_compression_alpha_trend`: **지도교수 피드백에 대한 직접적인
-  답**을 계산하는 함수. 18조합의 성능값에서 각 (FL, α) 지점의 "압축
-  페널티"(`compression` 인자로 고른 QLoRA-4bit 또는 8bit − LoRA)를 구하고,
-  α와 페널티의 Pearson 상관계수를 산출합니다. `performance_field`로
-  `val_perplexity`(성능)와 `rounds_run`(수렴 속도, 완전 무료로 이미
-  로깅된 값) 둘 다에 대해 계산해 두 지표가 같은 방향을 가리키는지
-  교차검증합니다(`scripts/analyze_interaction.py`). ROUGE-L처럼
-  높을수록 좋은 지표는 `higher_is_better=True`를 넘기면 부호 변환 없이
-  그대로 쓸 수 있습니다(안 넘기면 penalty 부호가 반대로 나옴에 유의).
-  페널티가 alpha와 무관(분산 0)하면 NaN 대신 0.0을 반환하도록
-  처리돼 있습니다.
-- `per_category_compression_penalty`: 위 상관관계 분석을 카테고리
-  단위로 쪼갠 버전. 각 태스크 카테고리의 상대 페널티(절대 차이가 아니라
-  `(lora-compression)/lora` 비율 — 카테고리마다 다른 PPL 절대 스케일
-  문제를 피하기 위함) 평균과, 카테고리 간 z-score(기본 임계값 1.0 초과면
-  `vulnerable=True`)를 계산해 "어떤 카테고리가 압축×non-IID 상호작용에
-  특히 취약한가"를 스크리닝합니다. 카테고리 수가 적어(Dolly 8종) 엄밀한
-  유의성 검정이 아니라 상대적 순위 매기기 용도이며, 표본 크기(`n`)가
-  작은 카테고리는 별도로 표시됩니다. `scripts/analyze_interaction.py`가
-  `score_generations_by_category`로 만든 입력을 받아 실제로 호출합니다.
-- `score_generations_by_category`: `*_generations.jsonl`(예측/참조/카테고리)
-  에서 예제별 ROUGE-L을 다시 계산해 카테고리별로 묶는 헬퍼 —
-  `per_category_compression_penalty`가 요구하는
-  `{category: {"rouge_l":.., "n":..}}` 입력을 만듭니다. PPL은 예제별로
-  로깅돼 있지 않아 ROUGE-L만 지원합니다.
-- `select_best_performing_combination`: Subtask 2.2에서 local_epochs=5
-  점검 대상을 고릅니다(18조합 전체 대상).
-- `per_category_breakdown`, `total_communication_cost`: Subtask 2.3
-  분석에서 그대로 불러 쓰는 함수들. 추가 GPU 비용 없이 이미 로깅된
-  데이터에서 계산됩니다.
-- `client_fairness_variance`: 순수 유틸리티 함수로만 남아있습니다 —
-  현재 held-out set이 클라이언트 간 전역 공유라 파이프라인에서는 호출하지
-  않습니다(항상 동일값이라 무의미). 아래 "알려진 한계" 참고.
-- `compute_interaction_effects` / `select_largest_interaction_fl_algorithm`:
-  원래 core 6조합·SCAFFOLD 대상 상호작용 계산 함수. 코드와 테스트는
-  그대로 남아있지만 새 core 설계(`analyze_interaction.py`)에서는
-  호출하지 않습니다.
-
-### `src/evaluate.py` — Subtask 1.3, 2.2, 2.3
 - `compute_compression_alpha_trend`: the function that computes **the
   direct answer to the advisor's feedback**. From the performance values
   of the 18 combinations, it derives the "compression penalty" (QLoRA-4bit
@@ -553,16 +298,7 @@ to pass.
 
 ---
 
-## 4. 워크플로우 (6주 타임라인과 매핑) (4. Workflow — Mapped to the 6-Week Timeline)
-
-| 주차 | 실행 명령 | 검증 대상 |
-|---|---|---|
-| Week 1 | `pytest tests/test_model_wiring.py` → `python scripts/run_dev_pilot.py --stage single_client` | 모델+GPU 환경 확인, PEFT 배선(LoRA/QLoRA/DoRA), 단일 클라이언트 loss 감소 |
-| Week 2 | `pytest tests/test_roundtrip.py tests/test_partitioning.py` | Dolly-15k 파이프라인, 파라미터 왕복, Dirichlet(α=1) 파티셔닝 검증 |
-| Week 3 | `pytest tests/test_fl_integration.py tests/test_convergence.py tests/test_checkpointing.py` | FedProx/SCAFFOLD 통합, 체크포인트/수렴 기준, 축소 규모 6조합 예행연습 |
-| Week 4 | `run_experiment.py` × 18(core) → `analyze_interaction.py` → local-epoch 강건성 점검 | Subtask 1.2 본 실험(개정 설계) + Subtask 2.2 진단 |
-| Week 5 | `pytest tests/test_evaluate.py` → 분석 노트북에서 `src/evaluate.py` 함수 직접 호출 | Subtask 1.3 압축률×non-IID 상관관계 분석, Subtask 2.3 카테고리별 진단 |
-| Week 6 | 리포트 작성 (설계 개정 배경·SCAFFOLD core 제외·single-seed 한계 명시) + 발표 | — |
+## 4. Workflow — Mapped to the 6-Week Timeline
 
 | Week | Command run | What it verifies |
 |---|---|---|
@@ -573,8 +309,6 @@ to pass.
 | Week 5 | `pytest tests/test_evaluate.py` → calling `src/evaluate.py` functions directly from an analysis notebook | Subtask 1.3 compression×non-IID correlation analysis, Subtask 2.3 per-category diagnostics |
 | Week 6 | write the report (noting the redesign background, SCAFFOLD dropped from core, and single-seed limitations) + present | — |
 
-**전체 테스트를 한 번에 돌리려면**:
-**To run the entire test suite at once**:
 ```bash
 pip install -r requirements.txt
 pytest tests/ -v
@@ -582,21 +316,7 @@ pytest tests/ -v
 
 ---
 
-## 5. 테스트 구성 (5. Test Composition)
-
-| 파일 | 무엇을 검증하는가 | 대응 단계 |
-|---|---|---|
-| `test_model_wiring.py` | LoRA/QLoRA(4bit·8bit)/DoRA 배선, 정의되지 않은 PEFT type이 `ValueError`를 내는지 | Week 1, 2(8bit 추가) |
-| `test_roundtrip.py` | FL 파라미터 송수신 시 값/순서 보존 | Week 2 |
-| `test_partitioning.py` | 최소 카테고리 임계값 리샘플링, α가 작을수록 실제로 더 비IID한지 | Week 2 |
-| `test_data.py` | 프롬프트 포맷, **라벨 마스킹**(-100이 prompt 구간만 정확히 덮는지), held-out 카테고리 균등 분할, ROUGE-L용 카테고리 층화 샘플링, 클라이언트 DataLoader 구성 (`load_raw_dolly15k`만 네트워크 마커) | Week 2 |
-| `test_fl_integration.py` | FedAvg/FedProx/SCAFFOLD 세 경로 모두 전체 루프 통과, SCAFFOLD의 `local_control` 라운드 간 유지, FedProx fit() 정상 동작, **`peak_vram_gb`/`total_latency_sec` 집계**, **이미 `num_rounds`에 도달한 체크포인트를 재개하면 크래시 대신 명확한 `RuntimeError`** | Week 3 |
-| `test_convergence.py` | 3라운드 연속 <1% 개선 시 실제로 멈추는지, 큰 폭 개선 중에는 안 멈추는지 | Week 3 |
-| `test_checkpointing.py` | 저장 후 재개 시 라운드/상태가 정확히 복원되는지 | Week 3 |
-| `test_metrics.py` | ROUGE-L 계산(동일 문자열/무관한 문자열/평균), trainable parameter 집계, VRAM/latency 계측 컨텍스트 매니저, 응답 생성 | Week 3 |
-| `test_scaffold.py` | control variate 집계 수식이 손으로 계산한 값과 일치하는지(delta_y 평균, 참여율에 따른 global_control 스케일링), 로컬 학습 1스텝이 실제로 파라미터를 갱신하는지 | Week 3 |
-| `test_server_eval.py` | `evaluate_global_model`/`evaluate_global_model_generation`이 `NumPyClient.evaluate()` 없이도 PPL/ROUGE-L을 정상적으로 계산하는지 (지도교수 피드백: server-side evaluation) | Week 3 |
-| `test_evaluate.py` | 카테고리별 분해, fairness variance, **압축률×α 상관관계 계산**(페널티 값·음의 상관관계·상수 페널티일 때 0.0·qlora_8bit 비교·ROUGE-L `higher_is_better` 부호), **카테고리별 취약도 스크리닝**(`per_category_compression_penalty`, `score_generations_by_category`와의 입출력 계약 포함), **최고 성능 조합 선정**, (레거시) 상호작용 효과 계산 | Week 4~6 |
+## 5. Test Composition
 
 | File | What it verifies | Corresponding week |
 |---|---|---|
@@ -614,21 +334,7 @@ pytest tests/ -v
 
 ---
 
-## 6. 실행 환경 (6. Execution Environment)
-
-- **Week 1~3 (개발/디버깅)**: Google Colab Pro — compute unit 소모가 적은
-  미니어처 검증 위주라 기본 구독만으로 충분합니다.
-- **Week 4 (본 실험)**: 예약형/스팟 단일 GPU 인스턴스(AWS g5.xlarge 또는
-  Lambda Labs A100) — `src/checkpointing.py`가 매 라운드 저장하므로 스팟
-  인스턴스가 회수되어도 안전하게 재개할 수 있습니다. Colab 유료 플랜(Pro/
-  Pro+)은 본 실험 규모(아래)에는 예산이 맞지 않아 권장하지 않습니다 —
-  Colab Pro+도 월 컴퓨팅 유닛이 A100 기준 35~40시간 상당인데 반해 필요한
-  총 시간은 이보다 많습니다. (Week 5 갱신: 모델을 Qwen2.5-1.5B를 거쳐
-  Qwen2.5-0.5B로 재축소하면서, g5.xlarge 스팟 기준 core 18회+진단 1회
-  총 19회 실행이 약 35~48 GPU-hr, 비용 약 $12~28로 추정됩니다(1.5B
-  기준 105~143 GPU-hr·$35~84에서 파라미터 비율로 선형 축소한 근사치이며,
-  정확한 값은 파일럿 실행으로 재확인 예정) — `week4` 브랜치 설계 노트
-  참고.)
+## 6. Execution Environment
 
 - **Week 1-3 (development/debugging)**: Google Colab Pro — the base
   subscription is enough since the work is mostly miniature verification
@@ -648,47 +354,12 @@ pytest tests/ -v
 
 ```bash
 pip install -r requirements.txt
-# bitsandbytes는 GPU 환경에서만 정상 설치/동작합니다.
 # bitsandbytes only installs/works correctly in a GPU environment.
 ```
 
 ---
 
-## 7. 알려진 한계 (Week 6 리포트 Limitations에 반영할 것) (7. Known Limitations — To Be Reflected in the Week 6 Report's Limitations Section)
-
-- **SCAFFOLD는 core 18조합에서 제외**됐습니다(Week 5 지도교수 피드백) —
-  코드(`src/scaffold.py`)와 테스트는 남아있지만, 본 실험은 FedAvg/FedProx
-  둘만 비교합니다. SCAFFOLD처럼 더 정교한 교정 알고리즘에서도 압축률×
-  non-IID 상관관계가 동일하게 나타나는지는 이번 스코프에서 답하지
-  못합니다. 또한 SCAFFOLD 자체는 여전히 **Option II의 간소화 근사
-  구현**입니다.
-- 모델을 **Qwen2.5-3B → Qwen2.5-1.5B → Qwen2.5-0.5B-Instruct로 재축소**
-  했습니다(GPU 시간/비용 추가 절감 목적) — 더 큰 모델에서도 같은
-  상관관계 패턴이 유지되는지는 검증하지 못했으며, 0.5B는 3B/1.5B보다
-  표현력이 낮아 압축×non-IID 상호작용 자체가 더 약하게(혹은 다르게)
-  나타날 위험도 있습니다.
-- 각 조합은 **1회씩만 실행**됩니다(반복/시드 없음) — 시간 제약상 불가피한 한계.
-- Held-out 평가셋은 **전역 공유 방식**이라 클라이언트별 분포 편향을 완전히
-  반영하지 못합니다. 이 때문에 클라이언트별 fairness variance는 (모든
-  클라이언트가 매 라운드 동일한 값을 갖게 되어) 의미 있는 신호가 되지
-  않아 로깅하지 않습니다 — `src/evaluate.py::client_fairness_variance`는
-  순수 유틸리티 함수로만 남아있습니다.
-- ROUGE-L은 held-out 전체가 아니라 **카테고리 층화 샘플
-  (`data.rouge_l_sample_size`, 기본 200개)**, **마지막 라운드 1회**만
-  계산합니다 — 자기회귀 생성 비용이 커서(1,501개 전체를 매 라운드 생성하면
-  수십 GPU시간) 통계적으로 안정적인 수준에서 샘플링합니다.
-- 압축률×α 상관관계(`compute_compression_alpha_trend`)는 α **3개 지점
-  (0.1/1/10)**만으로 계산한 Pearson 상관계수입니다 — 지점이 적어
-  비선형적인 패턴(예: 중간 α에서 페널티가 가장 큰 U자형)은 놓칠 수
-  있습니다.
-- `per_category_compression_penalty`의 카테고리별 취약도 z-score는
-  **Dolly 카테고리가 8종뿐**이고 `rouge_l_sample_size`(기본 200)를
-  카테고리로 층화하면 카테고리당 표본이 ~25개에 불과해, 엄밀한 통계적
-  유의성 검정이 아니라 **상대적 스크리닝**으로만 해석해야 합니다 —
-  표본이 특히 적은 카테고리(반환값의 `n`)는 순위가 시드에 따라 흔들릴
-  수 있습니다.
-- 코드 전체는 **문법 검증만 마쳤고 실제 GPU 환경에서 아직 실행되지 않았습니다.**
-  Week 1 첫날 `pytest tests/`부터 돌려서 실제 동작을 확인하세요.
+## 7. Known Limitations — To Be Reflected in the Week 6 Report's Limitations Section
 
 - **SCAFFOLD is dropped from the core 18 combinations** (Week 5 advisor
   feedback) — its code (`src/scaffold.py`) and tests remain, but the main
