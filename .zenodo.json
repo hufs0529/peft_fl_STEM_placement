@@ -1,0 +1,26 @@
+{
+  "title": "Quantisation and data heterogeneity in federated LoRA fine-tuning: code and experiment logs",
+  "upload_type": "software",
+  "license": "CC-BY-SA-4.0",
+  "creators": [
+    {
+      "name": "Kim, Jeonghun",
+      "affiliation": "Macquarie University",
+      "orcid": "0000-0000-0000-0000"
+    }
+  ],
+  "keywords": [
+    "federated learning",
+    "parameter-efficient fine-tuning",
+    "quantisation",
+    "non-IID data",
+    "large language models"
+  ],
+  "related_identifiers": [
+    {
+      "identifier": "https://github.com/hufs0529/peft_fl_STEM_placement",
+      "relation": "isSupplementTo",
+      "scheme": "url"
+    }
+  ]
+}
