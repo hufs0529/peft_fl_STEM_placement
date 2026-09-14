@@ -57,7 +57,7 @@ FOSE7901 STEM Research Placement, Macquarie University · Jeonghun Kim
 
 ## Deliverables
 
-Everything below is on the **`week6`** branch.
+Everything below is on the **`main and week6`** branch.
 
 | Deliverable | File |
 |---|---|
@@ -126,26 +126,20 @@ epoch per round, up to ten rounds with early stopping.
 The analysis reads only the per-round JSONL logs, so every table and figure in
 the report can be regenerated without a GPU and without repeating the training.
 
-```bash
-git clone https://github.com/hufs0529/peft_fl_STEM_placement.git
-cd peft_fl_STEM_placement
-git switch week6
-git restore --source=origin/week4-results --worktree -- results/logs
-git restore --source=origin/week5 --worktree -- results/logs
-python scripts/analyze_interaction.py
-python scripts/plot_results.py
-```
+From the Zenodo archive, unzip it and run:
 
-The two `restore` commands bring the logs of all 24 runs into the working tree
-without changing the branch. Analysis was run with Python 3.11.15, numpy 2.4.6,
-rouge-score 0.1.2 and matplotlib 3.11.1; the training environment is recorded in
-`env_alpha100.txt` on the `week5` branch.
+    sha256sum -c MANIFEST.sha256
+    python scripts/analyze_interaction.py
+    python scripts/plot_results.py
 
-To rerun the training itself, a GPU is required:
+From a clone of the repository, the same commands apply on `main`; no branch
+switching is required.
 
-```bash
-python scripts/run_experiment.py --peft qlora --qlora-bits 4 --fl fedavg --alpha 0.1
-```
+    git clone https://github.com/hufs0529/peft_fl_STEM_placement.git
+    cd peft_fl_STEM_placement
+
+Analysis was run with Python 3.11.15, numpy 2.4.6, rouge-score 0.1.2 and
+matplotlib 3.11.1. The training environment manifest is in `env_alpha100.txt`.
 
 ---
 
