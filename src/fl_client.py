@@ -1,8 +1,20 @@
 """공통 클라이언트 — 계획서 v2 §4.1(warmup), §4.2(FedProx proximal term),
 §5.3(VRAM/latency/ROUGE-L) 전부 통합된 버전.
 
+evaluate()는 Flower의 NumPyClient 인터페이스를 만족시키기 위해 남아있을
+뿐, 실제 평가는 지도교수 피드백("evaluation is based on the test on
+server, not individual clients")에 따라 src/server_eval.py를 통해
+서버 루프(fl_runner.py)가 직접 수행한다 — 자세한 내용은 그 모듈의
+docstring 참고.
+
 Common client — the version that integrates plan v2 §4.1 (warmup),
 §4.2 (FedProx proximal term), and §5.3 (VRAM/latency/ROUGE-L) all together.
+
+evaluate() is kept only to satisfy Flower's NumPyClient interface — actual
+evaluation is performed directly by the server loop (fl_runner.py) via
+src/server_eval.py, per advisor feedback ("evaluation is based on the
+test on server, not individual clients"); see that module's docstring for
+details.
 """
 
 from typing import Dict, Tuple
@@ -18,8 +30,9 @@ from src.communication import (
     set_trainable_state_dict,
     state_dict_to_ndarrays,
 )
-from src.metrics import compute_rouge_l, count_trainable_parameters, generate_responses, track_vram_and_latency
+from src.metrics import count_trainable_parameters, track_vram_and_latency
 from src.models import get_model
+from src.server_eval import evaluate_global_model, evaluate_global_model_generation
 
 
 class FlowerClient(NumPyClient):
@@ -83,8 +96,20 @@ class FlowerClient(NumPyClient):
         num_examples = 0
         loss_log = []
 
+        # 라운드 하나가 몇 분씩 걸릴 때 콘솔이 조용해서 멈춘 것처럼 보이는 문제
+        # 때문에 추가한 진행 로그 — 클라이언트당 대략 10번 정도만 찍히게
+        # log_every를 잡는다(너무 작은 클라이언트에서 스팸 안 되게, 큰
+        # 클라이언트에서 아예 안 보이지 않게).
+        # Progress log added because a multi-minute round with no console
+        # output looks stuck — log_every is sized so each client prints
+        # roughly 10 lines regardless of its data size (not spammy for small
+        # clients, not silent for large ones).
+        total_micro_steps = max(1, len(self.train_loader)) * local_epochs
+        log_every = max(1, total_micro_steps // 10)
+        global_step = 0
+
         with track_vram_and_latency(self.device) as perf_stats:
-            for _ in range(local_epochs):
+            for epoch in range(local_epochs):
                 for step, batch in enumerate(self.train_loader):
                     batch = {k: v.to(self.device) for k, v in batch.items()}
                     loss = self.model(**batch).loss / accum_steps
@@ -106,6 +131,12 @@ class FlowerClient(NumPyClient):
                     loss_log.append(loss.item() * accum_steps)
                     num_examples += batch["input_ids"].shape[0]
 
+                    global_step += 1
+                    if global_step % log_every == 0 or global_step == total_micro_steps:
+                        recent = loss_log[-log_every:]
+                        print(f"    [client {self.client_id}] step {global_step}/{total_micro_steps} "
+                              f"(epoch {epoch + 1}/{local_epochs}) — recent avg loss={sum(recent) / len(recent):.4f}")
+
         param_stats = count_trainable_parameters(self.model)
         avg_train_loss = sum(loss_log) / max(len(loss_log), 1)
 
@@ -120,19 +151,23 @@ class FlowerClient(NumPyClient):
         return self.get_parameters(cfg), num_examples, metrics
 
     def evaluate(self, parameters: NDArrays, cfg) -> Tuple[float, int, Dict[str, Scalar]]:
+        """Flower의 NumPyClient 인터페이스를 만족시키기 위해 남겨둔
+        메서드다 — 실제 서버 루프(fl_runner.py)는 지도교수 피드백
+        ("evaluation is based on the test on server, not individual
+        clients")에 따라 이 메서드를 거치지 않고
+        src/server_eval.py의 함수를 직접 호출한다. 로직 자체는 거기
+        있는 걸 그대로 재사용해 중복을 피한다.
+
+        Kept only to satisfy Flower's NumPyClient interface — the actual
+        server loop (fl_runner.py) does not call this; per advisor
+        feedback ("evaluation is based on the test on server, not
+        individual clients"), it calls src/server_eval.py's functions
+        directly. The logic here is reused from there, not duplicated.
+        """
         self.set_parameters(parameters)
-        self.model.eval()
         run_generation = cfg.get("run_generation_metrics", False)
 
-        total_loss, n = 0.0, 0
-        with torch.no_grad():
-            for i in range(len(self.eval_dataset)):
-                item = self.eval_dataset[i]
-                batch = {k: item[k].unsqueeze(0).to(self.device) for k in ("input_ids", "attention_mask", "labels")}
-                total_loss += self.model(**batch).loss.item()
-                n += 1
-        avg_loss = total_loss / max(n, 1)
-
+        avg_loss, n = evaluate_global_model(self.model, self.eval_dataset, device=self.device)
         metrics: Dict[str, Scalar] = {
             "client_id": self.client_id,
             "perplexity": torch.exp(torch.tensor(avg_loss)).item(),
@@ -144,12 +179,9 @@ class FlowerClient(NumPyClient):
             # rouge_eval_dataset is a category-stratified sample that is much
             # smaller than eval_dataset (full PPL set) — this is to control
             # generation cost (Subtask 1.2).
-            ds = self.rouge_eval_dataset
-            prompts = [ds[i]["prompt"] for i in range(len(ds))]
-            references = [ds[i]["reference_response"] for i in range(len(ds))]
-            predictions = generate_responses(self.model, self.tokenizer, prompts, device=self.device)
-            metrics["rouge_l"] = compute_rouge_l(predictions, references)
-            metrics["_per_example_categories"] = [ds[i]["category"] for i in range(len(ds))]
-            metrics["_generated_predictions"] = predictions
+            gen = evaluate_global_model_generation(self.model, self.tokenizer, self.rouge_eval_dataset, device=self.device)
+            metrics["rouge_l"] = gen["rouge_l"]
+            metrics["_per_example_categories"] = gen["categories"]
+            metrics["_generated_predictions"] = gen["predictions"]
 
         return avg_loss, n, metrics

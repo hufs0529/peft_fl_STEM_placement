@@ -35,6 +35,20 @@ def test_qlora_has_trainable_params():
     assert len(get_trainable_state_dict(model)) > 0
 
 
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="qlora(bitsandbytes 8bit)는 GPU 환경에서만 동작")
+def test_qlora_8bit_has_trainable_params():
+    """지도교수 피드백: 압축률 스윕용 8bit(INT8) QLoRA 배선 검증.
+
+    Advisor feedback: verifies the wiring of 8-bit (INT8) QLoRA, used for
+    the compression-rate sweep.
+    """
+    config = load_dev_config()
+    config["peft"]["type"] = "qlora"
+    config["peft"]["qlora_bits"] = 8
+    model = get_model(config)
+    assert len(get_trainable_state_dict(model)) > 0
+
+
 def test_dora_has_trainable_params():
     """Subtask 2.1 진단 대조군: DoRA (use_dora=True, 양자화 없음).
 

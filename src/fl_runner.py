@@ -10,14 +10,31 @@ Strategy 집계 로직을 직접 구현하는 수동 루프를 씁니다. 배선
   - FedAvg/FedProx는 weighted-average 집계, SCAFFOLD는 scaffold.py 경로
   - (선택) W&B 실시간 로깅
 
-평가 설계: PPL은 매 라운드, 대표 클라이언트(clients[0]) 1개로만 계산한다.
+압축률×non-IID 트레이드오프 분석(지도교수 피드백)을 위해, FedAvg/FedProx
+클라이언트의 fit()이 이미 계산하던 peak_vram_gb/latency_sec(src/metrics.py)를
+그동안 round_record에 집계하지 않고 버리고 있었다 — 이번에 round_record에
+peak_vram_gb(참여 클라이언트 평균)를, 최종 반환값에 avg_peak_vram_gb/
+total_latency_sec를 추가해 압축률×α 상관분석에 쓸 수 있게 했다. SCAFFOLD는
+scaffold_client_fit()이 이 계측을 하지 않아 peak_vram_gb가 None으로
+남는다 — core 분석(압축×non-IID)에서는 SCAFFOLD가 애초에 빠지므로
+의도적으로 계측을 추가하지 않았다.
+
+평가 설계 (지도교수 피드백: "evaluation is based on the test on server,
+not individual clients" 반영): PPL은 매 라운드 서버가 src/server_eval.py를
+통해 직접 계산한다 — Flower의 NumPyClient.evaluate() 인터페이스(클라이언트
+쪽 메서드)를 거치지 않는다. 평가엔 어떤 클라이언트 객체에도 속하지 않는
+**서버 전용 모델 인스턴스(server_model)**를 쓴다 — 8개 클라이언트가 각자
+자기 모델을 GPU에 들고 있는 것과 별개로, 서버도 자기 모델을 하나 더
+들고 있는 구조다(둘 다 같은 프로세스/GPU를 쓰는 로컬 시뮬레이션이라
+실제로는 모델 인스턴스가 9개 공존한다). 평가 시점엔 그 라운드 fit()
+결과를 집계(aggregate)한 global_state가 server_model에 로드돼 있다.
 집계 직후 모든 클라이언트는 동일한 global 파라미터로 덮어써지고 동일한
-공용 held-out set을 보므로, 8명을 전부 평가해도 결과가 (부동소수점 오차
-제외) 동일하다 — 나머지 7번은 순수 중복 계산이라 제거했다. 이 설계상
-클라이언트별 fairness variance는 의미가 없어(모두 동일값) 계산하지 않는다
-(README 알려진 한계 참고). ROUGE-L(생성 필요, 훨씬 비쌈)은 매 라운드가
-아니라 루프 종료 후 최종 global 파라미터 기준 1회만, 카테고리 층화
-샘플(rouge_eval_dataset)에 대해서만 계산한다.
+공용 held-out set을 보므로, 몇 번을 평가하든 결과가 (부동소수점 오차
+제외) 동일하다 — 그래서 서버는 이 held-out을 딱 1번만 평가한다. 이
+설계상 클라이언트별 fairness variance는 의미가 없어(모두 동일값)
+계산하지 않는다(README 알려진 한계 참고). ROUGE-L(생성 필요, 훨씬
+비쌈)도 매 라운드가 아니라 루프 종료 후 최종 global_state 기준 1회만,
+카테고리 층화 샘플(rouge_eval_dataset)에 대해 서버가 직접 계산한다.
 
 Manual FL round loop — the core execution engine of the research plan.
 
@@ -34,17 +51,36 @@ Strategy aggregation logic directly. What is wired in:
     scaffold.py path
   - (Optional) real-time W&B logging
 
-Evaluation design: PPL is computed every round, using only one representative
-client (clients[0]). Right after aggregation all clients are overwritten with
-the same global parameters and see the same shared held-out set, so
-evaluating all 8 would give the same result (aside from floating-point
-error) — the other 7 evaluations are pure duplicate computation and have
-been removed. Under this design, per-client fairness variance is meaningless
-(all values are identical) and is therefore not computed (see the README's
-Known Limitations). ROUGE-L (requires generation, much more expensive) is
-computed not every round but exactly once, after the loop ends, on the final
-global parameters, over the category-stratified sample
-(rouge_eval_dataset) only.
+For the compression-rate × non-IID trade-off analysis (advisor feedback):
+FedAvg/FedProx clients' fit() already computed peak_vram_gb/latency_sec
+(src/metrics.py), but round_record was discarding them instead of logging
+them. This adds peak_vram_gb (averaged over participating clients) to
+round_record, and avg_peak_vram_gb/total_latency_sec to the final return
+value, so they can be used in the compression × α correlation analysis.
+SCAFFOLD's scaffold_client_fit() does not perform this measurement, so its
+peak_vram_gb stays None — intentionally not instrumented, since SCAFFOLD is
+already excluded from the core (compression × non-IID) analysis.
+
+Evaluation design (reflects advisor feedback: "evaluation is based on the
+test on server, not individual clients"): PPL is computed every round by
+the server itself, directly via src/server_eval.py — it does not go
+through Flower's NumPyClient.evaluate() interface (a client-side method).
+Evaluation uses a **dedicated server-only model instance (server_model)**
+that belongs to no client — the 8 clients each already hold their own
+model on the GPU, and the server now holds one more of its own (since this
+is a local simulation sharing one process/GPU, not a real distributed
+deployment, 9 model instances effectively coexist). At evaluation time,
+that round's aggregated fit() results (global_state) are loaded into
+server_model. Right after aggregation all clients are overwritten with the
+same global parameters and see the same shared held-out set, so evaluating
+it any number of times gives the same result (aside from floating-point
+error) — hence the server evaluates this held-out set exactly once. Under
+this design, per-client fairness variance is meaningless (all values are
+identical) and is therefore not computed (see the README's Known
+Limitations). ROUGE-L (requires generation, much more expensive) is also
+computed by the server directly, not every round but exactly once after
+the loop ends, on the final global_state, over the category-stratified
+sample (rouge_eval_dataset) only.
 """
 
 import json
@@ -57,7 +93,9 @@ import torch
 from src.checkpointing import resume_or_start_fresh, save_checkpoint
 from src.communication import compute_payload_bytes, get_trainable_state_dict, set_trainable_state_dict
 from src.convergence import ConvergenceTracker
+from src.models import get_model
 from src.scaffold import scaffold_aggregate, scaffold_client_fit, zeros_like_trainable
+from src.server_eval import evaluate_global_model, evaluate_global_model_generation
 
 
 def _init_wandb(config: dict, run_name: str):
@@ -87,10 +125,25 @@ def run_federated_training(
     round_log_path = os.path.join(log_dir, f"{run_name}_rounds.jsonl")
     wb = _init_wandb(config, run_name)
 
+    # 서버 전용 모델 인스턴스 — 클라이언트 객체와 무관하게 평가만 전담한다
+    # (지도교수 피드백: evaluate on server, not individual clients). 8개
+    # 클라이언트도 각자 자기 모델을 GPU에 들고 있으므로, 이건 같은 프로세스
+    # 안에 모델 인스턴스가 하나(서버) 더 추가되는 것일 뿐이다 — 실제
+    # 분산 배포가 아니라 로컬 시뮬레이션이라 전부 같은 GPU/프로세스를 쓴다.
+    # A server-only model instance — dedicated to evaluation, independent
+    # of any client object (advisor feedback: evaluate on server, not
+    # individual clients). Since the 8 clients each already hold their own
+    # model on the GPU, this just adds one more model instance (the
+    # server's) to the same process — this is a local simulation, not a
+    # real distributed deployment, so everything shares the same GPU/process.
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    server_model = get_model(config)
+    server_model.to(device)
+
     start_round, resumed_state, extra = resume_or_start_fresh(checkpoint_base_dir, run_name)
-    template_state = get_trainable_state_dict(clients[0].model)
+    template_state = get_trainable_state_dict(server_model)
     global_state = resumed_state if resumed_state is not None else {k: v.clone() for k, v in template_state.items()}
-    global_control = extra.get("global_control") or zeros_like_trainable(clients[0].model)
+    global_control = extra.get("global_control") or zeros_like_trainable(server_model)
     if fl_type == "scaffold":
         for c in clients:
             if not hasattr(c, "local_control"):
@@ -102,6 +155,14 @@ def run_federated_training(
     )
     convergence.history = extra.get("val_loss_history", [])
 
+    if start_round >= num_rounds:
+        raise RuntimeError(
+            f"[{run_name}] 재개할 체크포인트가 이미 round {start_round}까지 진행됐는데 "
+            f"num_rounds={num_rounds}이라 더 돌 라운드가 없습니다 — 이 run은 이미 끝났거나 "
+            f"num_rounds를 더 늘려야 합니다. (재개 소스: "
+            f"{checkpoint_base_dir}/{run_name}/round_{start_round:03d}.pt)"
+        )
+
     payload_bytes_per_round = compute_payload_bytes(global_state)
     round_records = []
     converged_round = None
@@ -112,8 +173,11 @@ def run_federated_training(
         selected_idx = torch.randperm(num_clients)[:num_selected].tolist()
 
         fit_results = []
-        for idx in selected_idx:
+        for i, idx in enumerate(selected_idx):
             client = clients[idx]
+            client_n = len(client.train_loader.dataset)
+            client_start = time.perf_counter()
+            print(f"[{run_name}] round {round_num} — client {idx} 시작 ({i + 1}/{len(selected_idx)}, n={client_n})")
             if fl_type == "scaffold":
                 delta_y, delta_c, num_ex, new_local_control = scaffold_client_fit(
                     client.model, global_state, client.local_control, global_control,
@@ -126,6 +190,8 @@ def run_federated_training(
                 set_trainable_state_dict(client.model, global_state)
                 params, num_ex, metrics = client.fit([v.numpy() for v in global_state.values()], {"server_round": round_num})
                 fit_results.append({"params": params, "num_examples": num_ex, "metrics": metrics})
+            print(f"[{run_name}] round {round_num} — client {idx} 완료 "
+                  f"({time.perf_counter() - client_start:.1f}s, {num_ex} examples)")
 
         if fl_type == "scaffold":
             client_deltas = [(r["delta_y"], r["delta_c"], r["num_examples"]) for r in fit_results]
@@ -145,15 +211,26 @@ def run_federated_training(
                     new_state[k] += weight * torch.tensor(r["params"][i])
             global_state = new_state
 
-        # PPL 전용 평가: 대표 클라이언트 1개만 (위 모듈 docstring 참고 — 8명 다
-        # 평가해도 결과가 동일해 나머지는 순수 중복 계산이었음).
-        # PPL-only evaluation: only one representative client (see the module
-        # docstring above — evaluating all 8 gives the same result, so the
-        # rest were pure duplicate computation).
-        set_trainable_state_dict(clients[0].model, global_state)
-        val_loss, _n, _metrics = clients[0].evaluate(
-            [v.numpy() for v in global_state.values()], {"run_generation_metrics": False}
-        )
+        # PPL 전용 평가: 서버 전용 모델(server_model)로 서버가 직접 수행
+        # (위 모듈 docstring 참고 — 클라이언트 객체를 거치지 않고, 8명 다
+        # 평가해도 결과가 동일해 1번만 함). eval_dataset은 클라이언트마다
+        # 다른 게 아니라 전역 공유라 clients[0]에서 그냥 참조만 가져온다.
+        # PPL-only evaluation: performed by the server directly, on the
+        # server's own model instance (see the module docstring above —
+        # no client object involved, and evaluating all 8 clients would
+        # give the same result, so it's done only once). eval_dataset is
+        # shared globally (not client-specific), so grabbing the reference
+        # via clients[0] is just a convenience.
+        set_trainable_state_dict(server_model, global_state)
+        val_loss, _n = evaluate_global_model(server_model, clients[0].eval_dataset, device=device)
+
+        # FedAvg/FedProx의 fit_results에만 metrics(peak_vram_gb 포함)가 있음 —
+        # SCAFFOLD 경로는 scaffold_client_fit()이 이 계측을 하지 않아 빠짐.
+        # FedAvg/FedProx's fit_results carry metrics (incl. peak_vram_gb) —
+        # the SCAFFOLD path is absent since scaffold_client_fit() doesn't
+        # perform this measurement.
+        client_vram = [r["metrics"]["peak_vram_gb"] for r in fit_results if "metrics" in r]
+        peak_vram_gb = sum(client_vram) / len(client_vram) if client_vram else None
 
         round_record = {
             "round": round_num,
@@ -161,6 +238,7 @@ def run_federated_training(
             "val_perplexity": float(torch.exp(torch.tensor(val_loss))),
             "round_latency_sec": time.perf_counter() - round_start,
             "communication_bytes_this_round": payload_bytes_per_round * len(selected_idx),
+            "peak_vram_gb": peak_vram_gb,
         }
         round_records.append(round_record)
         with open(round_log_path, "a") as f:
@@ -184,19 +262,20 @@ def run_federated_training(
             break
 
     # 루프 종료(수렴 조기종료 또는 num_rounds 도달) 후, 최종 global 파라미터
-    # 기준으로 ROUGE-L 생성 평가를 정확히 1회만 수행 (Subtask 1.2 task
-    # performance 지표 중 생성이 필요한 부분 — 비용 통제를 위해 라운드마다
-    # 돌리지 않는다).
+    # 기준으로 ROUGE-L 생성 평가를 정확히 1회만 서버가 직접 수행 (Subtask 1.2
+    # task performance 지표 중 생성이 필요한 부분 — 비용 통제를 위해
+    # 라운드마다 돌리지 않는다).
     # After the loop ends (early stop on convergence or reaching num_rounds),
-    # run the ROUGE-L generation evaluation exactly once on the final global
-    # parameters (the generation-requiring part of the Subtask 1.2 task
-    # performance metrics — not run every round in order to control cost).
-    set_trainable_state_dict(clients[0].model, global_state)
-    _, _, final_metrics = clients[0].evaluate(
-        [v.numpy() for v in global_state.values()], {"run_generation_metrics": True}
+    # the server runs the ROUGE-L generation evaluation directly, exactly
+    # once, on the final global parameters (the generation-requiring part of
+    # the Subtask 1.2 task performance metrics — not run every round in
+    # order to control cost).
+    set_trainable_state_dict(server_model, global_state)
+    final_gen = evaluate_global_model_generation(
+        server_model, clients[0].tokenizer, clients[0].rouge_eval_dataset, device=device
     )
-    if "rouge_l" in final_metrics:
-        round_records[-1]["rouge_l"] = final_metrics["rouge_l"]
+    if "rouge_l" in final_gen:
+        round_records[-1]["rouge_l"] = final_gen["rouge_l"]
         with open(round_log_path) as f:
             lines = f.readlines()
         lines[-1] = json.dumps(round_records[-1]) + "\n"
@@ -204,11 +283,11 @@ def run_federated_training(
             f.writelines(lines)
         if wb is not None:
             import wandb
-            wandb.log({"rouge_l": final_metrics["rouge_l"]}, step=round_records[-1]["round"])
+            wandb.log({"rouge_l": final_gen["rouge_l"]}, step=round_records[-1]["round"])
 
         gen_path = os.path.join(log_dir, f"{run_name}_generations.jsonl")
-        predictions = final_metrics.get("_generated_predictions", [])
-        categories = final_metrics.get("_per_example_categories", [])
+        predictions = final_gen.get("predictions", [])
+        categories = final_gen.get("categories", [])
         if predictions:
             with open(gen_path, "w") as gf:
                 for i, pred in enumerate(predictions):
@@ -220,6 +299,9 @@ def run_federated_training(
                     }) + "\n")
 
     total_comm_bytes = sum(r["communication_bytes_this_round"] for r in round_records)
+    total_latency_sec = sum(r["round_latency_sec"] for r in round_records)
+    vram_values = [r["peak_vram_gb"] for r in round_records if r["peak_vram_gb"] is not None]
+    avg_peak_vram_gb = sum(vram_values) / len(vram_values) if vram_values else None
     if wb is not None:
         import wandb
         wandb.finish()
@@ -232,5 +314,7 @@ def run_federated_training(
         "val_perplexity": round_records[-1]["val_perplexity"],
         "rouge_l": round_records[-1].get("rouge_l"),
         "total_communication_bytes": total_comm_bytes,
+        "total_latency_sec": total_latency_sec,
+        "avg_peak_vram_gb": avg_peak_vram_gb,
         "round_records": round_records,
     }
