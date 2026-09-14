@@ -12,6 +12,17 @@ and reference responses from databricks-dolly-15k (CC BY-SA 3.0). Neither the
 source corpus nor the base model (Qwen2.5-0.5B-Instruct, Apache-2.0) is
 redistributed here; both are fetched from the Hugging Face Hub at run time.
 
+## Repository structure
+
+`main` holds the complete, self-contained snapshot archived at the DOI above:
+source, tests, analysis scripts and all 24 run logs.
+
+The weekly branches `week1`–`week6` are the laboratory record. Each holds the
+state of the project at the end of that week, so the code that produced any
+result is recoverable as it stood at the time. `week4-results` and `week5`
+additionally hold the per-round model checkpoints, which are not part of the
+archive.
+
 # Dolly-15k FL × PEFT Research Placement
 
 Federated fine-tuning of a small instruction-following language model under two
