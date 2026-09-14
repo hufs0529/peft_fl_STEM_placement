@@ -1,3 +1,17 @@
+## Licence
+
+This repository is dual-licensed.
+
+| Component | Licence |
+|---|---|
+| Source code, tests, analysis scripts | Apache-2.0 (`LICENSE`) |
+| Experiment logs in `results/logs/` | CC BY-SA 4.0 (`LICENSE-DATA`) |
+
+The logs are share-alike because `*_generations.jsonl` reproduces instructions
+and reference responses from databricks-dolly-15k (CC BY-SA 3.0). Neither the
+source corpus nor the base model (Qwen2.5-0.5B-Instruct, Apache-2.0) is
+redistributed here; both are fetched from the Hugging Face Hub at run time.
+
 # Dolly-15k FL × PEFT Research Placement
 
 Federated fine-tuning of a small instruction-following language model under two
