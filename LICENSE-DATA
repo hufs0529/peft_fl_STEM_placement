@@ -1,0 +1,18 @@
+Experiment logs and generated outputs in results/logs/
+
+Copyright 2026 Jeonghun Kim
+
+Licensed under the Creative Commons Attribution-ShareAlike 4.0
+International License (CC BY-SA 4.0).
+Full text: https://creativecommons.org/licenses/by-sa/4.0/legalcode
+
+ATTRIBUTION AND SHARE-ALIKE NOTICE
+
+The *_generations.jsonl files contain instructions and reference responses
+drawn from databricks-dolly-15k (Databricks, Inc.), licensed under
+CC BY-SA 3.0. These files are therefore adaptations of that corpus and are
+released under CC BY-SA 4.0, permitted under section 4(b) of CC BY-SA 3.0,
+which allows adaptations to be distributed under a later version of the
+licence with the same licence elements.
+
+Source corpus: https://huggingface.co/datasets/databricks/databricks-dolly-15k
