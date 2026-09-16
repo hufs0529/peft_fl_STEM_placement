@@ -1,0 +1,5 @@
+{"round": 1, "val_loss": 1.899852234616368, "val_perplexity": 6.684906959533691, "round_latency_sec": 696.2073526179993, "communication_bytes_this_round": 17301504, "peak_vram_gb": 14.437152862548828}
+{"round": 2, "val_loss": 1.83877182914891, "val_perplexity": 6.288809776306152, "round_latency_sec": 696.1666596130017, "communication_bytes_this_round": 17301504, "peak_vram_gb": 14.444202423095703}
+{"round": 3, "val_loss": 1.8256508357494412, "val_perplexity": 6.206833362579346, "round_latency_sec": 696.5023145520008, "communication_bytes_this_round": 17301504, "peak_vram_gb": 14.444202423095703}
+{"round": 4, "val_loss": 1.8158353572498582, "val_perplexity": 6.1462082862854, "round_latency_sec": 696.1695975969997, "communication_bytes_this_round": 17301504, "peak_vram_gb": 14.444202423095703}
+{"round": 5, "val_loss": 1.8095723651847246, "val_perplexity": 6.107834815979004, "round_latency_sec": 695.8828913430007, "communication_bytes_this_round": 17301504, "peak_vram_gb": 14.444202423095703, "rouge_l": 0.2882314358598753}
